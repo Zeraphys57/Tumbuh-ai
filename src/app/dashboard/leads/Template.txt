@@ -1,0 +1,132 @@
+Siap, Bryan! Ini adalah file CleanTemplateDashboard.tsx. File ini sengaja dibuat "botak" tanpa desain yang berat, tapi semua logika intinya (Supabase, Real-time, Logout, Refresh, AI Trainer, dan Addon) sudah terpasang rapi.
+
+Jadi besok-besok kalau ada klien baru, kamu tinggal copas file ini dan fokus jualan desain Tailwind-mu saja.
+
+1. Template Dasar: components/CleanTemplateDashboard.tsx
+TypeScript
+
+
+=======================================================================================================================================================================================
+"use client";
+import { useEffect, useState, useCallback } from "react";
+import { createBrowserClient } from "@supabase/ssr";
+import { useRouter } from "next/navigation";
+
+export default function CleanTemplateDashboard() {
+  // --- 1. STATE MANAGEMENT ---
+  const [leads, setLeads] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [clientId, setClientId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [dailyInfo, setDailyInfo] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+
+  const router = useRouter();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  // --- 2. LOGIKA PENARIKAN DATA ---
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const id = user?.user_metadata?.client_id;
+      if (!id) return;
+      setClientId(id);
+
+      const [leadsRes, clientRes, addonRes] = await Promise.all([
+        supabase.from("leads").select("*").eq("client_id", id).order("created_at", { ascending: false }),
+        supabase.from("clients").select("system_prompt").eq("id", id).single(),
+        supabase.from("client_addons_data").select("content").eq("client_id", id).eq("addon_type", "daily_menu").single()
+      ]);
+
+      if (leadsRes.data) setLeads(leadsRes.data);
+      if (clientRes.data) setPrompt(clientRes.data.system_prompt || "");
+      if (addonRes.data) setDailyInfo(addonRes.data.content || "");
+    } catch (err) { console.error("Error fetching data:", err); } 
+    finally { setLoading(false); }
+  }, [supabase]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // --- 3. FUNGSI HANDLER ---
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/login"; // Force reload agar cache rute hilang
+  };
+
+  const handleUpdatePrompt = async () => {
+    setIsSaving(true);
+    await supabase.from("clients").update({ system_prompt: prompt }).eq("id", clientId);
+    setIsSaving(false);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  const handleUpdateAddon = async () => {
+    await supabase.from("client_addons_data").upsert({ 
+      client_id: clientId, addon_type: "daily_menu", content: dailyInfo 
+    });
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  // --- 4. UI RENDER (GANTI BAGIAN INI UNTUK KUSTOMISASI) ---
+  return (
+    <div className="p-8 font-sans">
+      {/* Toast Notification */}
+      {showToast && <div className="fixed top-5 right-5 bg-black text-white p-4 rounded-xl z-50">Data Terupdate!</div>}
+
+      <header className="flex justify-between items-center mb-10">
+        <h1 className="text-2xl font-bold uppercase tracking-tighter italic">Client Node: <span className="text-blue-600">TEMPLATE</span></h1>
+        <div className="flex gap-2">
+          <button onClick={fetchData} className="px-4 py-2 border rounded-lg text-xs font-bold uppercase">Refresh</button>
+          <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-bold uppercase">Logout</button>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* LEADS SECTION */}
+        <div className="lg:col-span-2 space-y-4">
+          <h2 className="text-sm font-black uppercase text-slate-400 tracking-widest">Database Leads</h2>
+          {leads.map((lead) => (
+            <div key={lead.id} className="p-6 bg-white border rounded-3xl flex justify-between items-center">
+              <div>
+                <p className="font-bold uppercase">{lead.customer_name}</p>
+                <p className="text-xs text-slate-400">{lead.customer_phone}</p>
+              </div>
+              <a href={`https://wa.me/${lead.customer_phone}`} className="text-[10px] font-black underline uppercase">Contact</a>
+            </div>
+          ))}
+        </div>
+
+        {/* CONTROL SECTION */}
+        <div className="space-y-6">
+          <div className="p-6 bg-slate-50 rounded-3xl border">
+            <h3 className="text-xs font-black uppercase mb-4">AI Trainer</h3>
+            <textarea className="w-full h-40 p-4 rounded-xl border mb-4 text-xs" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <button onClick={handleUpdatePrompt} className="w-full py-3 bg-black text-white rounded-xl text-xs font-bold uppercase">Sync Prompt</button>
+          </div>
+
+          <div className="p-6 bg-slate-50 rounded-3xl border">
+            <h3 className="text-xs font-black uppercase mb-4">Daily Addon</h3>
+            <textarea className="w-full h-24 p-4 rounded-xl border mb-4 text-xs" value={dailyInfo} onChange={(e) => setDailyInfo(e.target.value)} />
+            <button onClick={handleUpdateAddon} className="w-full py-3 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Sync Addon</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+=======================================================================================================================================================================================
+
+
+Tips Jualan Buat Bryan:
+Waktu Pengerjaan: Dengan template ini, kamu bisa selesaikan satu UI kustom dalam 30-60 menit saja.
+
+Addon List: Kamu bisa buat banyak addon selain daily_menu, misalnya promo_mingguan atau jadwal_dokter. Kamu tinggal ganti string addon_type-nya saja.
+
+Real-time: Template di atas belum ada real-time biar ringan, tapi kalau klien minta fitur yang bisa bunyi "Ting!" pas ada pesan masuk, tinggal copas baris useEffect real-time dari kode kita sebelumnya.
