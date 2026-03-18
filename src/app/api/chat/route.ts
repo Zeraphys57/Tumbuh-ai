@@ -3,8 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 // --- IMPORT GUDANG PERKAKAS AGENTIC ---
-import { getGeminiToolsConfig, executeAgenticCall } from "@/app/agentic/index"; // Sesuaikan path jika pakai index.ts
-
+import { getGeminiToolsConfig, executeAgenticCall } from "@/app/agentic/agentic-tools";
 export const maxDuration = 60;
 // ============================================================================
 // INISIALISASI PRODUCTION (VIP PASS)
