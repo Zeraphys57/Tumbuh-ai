@@ -9,7 +9,8 @@ import AITrainer from "./ui/AITrainer";
 import RefreshEngine from "./ui/RefreshEngine";
 import WeeklyAnalyticsChart from "./ui/WeeklyAnalyticsChart";
 import LiveChat from "./ui/LiveChat";
-import EmergencyContact from "./ui/EmergencyContact"; // <--- IMPORT KOMPONEN KONTAK DARURAT
+import EmergencyContact from "./ui/EmergencyContact"; 
+import RAGTrainer from "./ui/RAGTrainer";
 
 // --- IMPORT KOMPONEN ADD-ON FREEMIUM (MILIK TUMBUH.AI) ---
 import AITrainingCopilot from "../addons/AITrainingCopilot"; // Freemium 1
@@ -300,6 +301,8 @@ export default function DemoDashboard() {
             isSaving={isSaving} 
             setShowToast={setShowToast} 
           />
+
+          <RAGTrainer clientId={clientId} />
 
           {/* ========================================================
               KOMPONEN KONTAK DARURAT (WA ADMIN) DI SINI

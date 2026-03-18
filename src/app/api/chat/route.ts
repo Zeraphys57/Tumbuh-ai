@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 // --- IMPORT GUDANG PERKAKAS AGENTIC ---
-import { getGeminiToolsConfig, executeAgenticCall } from "@/app/agentic/agentic-tools"; 
+import { getGeminiToolsConfig, executeAgenticCall } from "@/app/agentic/index"; // Sesuaikan path jika pakai index.ts
 
 export const maxDuration = 60;
 // ============================================================================
@@ -47,6 +47,7 @@ export async function POST(req: Request) {
 
     const clientData = client; 
 
+    // --- LOGIKA ADDON LAMA (STATIC) ---
     let addonText = "";
     let featuresObj: any = {};
     try {
@@ -63,12 +64,51 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. MASTER PROMPT SINKRONISASI
+    // ========================================================================
+    // 🧠 3. RAG ENGINE: PENCARIAN DOKUMEN (KNOWLEDGE BASE) 🧠
+    // ========================================================================
+    let ragContextText = "";
+    try {
+      // a. Ubah chat user jadi Vektor (Angka) dengan 1536 dimensi (Sesuai upgrade Bos!)
+      const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+      const embedResult = await embeddingModel.embedContent({
+        content: { role: "user", parts: [{ text: message }] },
+        taskType: "RETRIEVAL_QUERY", // Optimasi khusus untuk pencarian pertanyaan
+        outputDimensionality: 1536   // Disesuaikan dengan batas aman Supabase HNSW
+      } as any); // "Surat Sakti" Anti-TypeScript Error
+      
+      const queryVector = embedResult.embedding.values;
+
+      // b. Cari di tabel client_knowledge via RPC Supabase
+      const { data: matchedDocs, error: matchError } = await supabase.rpc("match_client_knowledge", {
+        query_embedding: queryVector,
+        match_threshold: 0.65, // Ambil dokumen yang kemiripannya minimal 65%
+        match_count: 3, // Ambil maksimal 3 potongan dokumen agar AI tidak kepenuhan memori
+        p_client_id: clientData.id
+      });
+
+      if (matchError) {
+         console.error("RPC Error:", matchError);
+      } else if (matchedDocs && matchedDocs.length > 0) {
+        ragContextText = `\n\n=== DOKUMEN REFERENSI DARI KNOWLEDGE BASE ===\n`;
+        matchedDocs.forEach((doc: any) => {
+          ragContextText += `[Sumber: ${doc.document_name}]:\n${doc.content}\n\n`;
+        });
+        ragContextText += `INSTRUKSI RAG KHUSUS: 
+- JIKA pelanggan bertanya hal yang relevan dengan Dokumen Referensi di atas, WAJIB gunakan data dari dokumen tersebut untuk menjawab!
+- JIKA jawaban tidak ada di Dokumen Referensi dan Konteks Bisnis, ikuti Aturan Besi nomor 1 (Jangan mengarang jawaban).\n`;
+      }
+    } catch (ragErr) {
+      console.error("RAG Search Engine Error:", ragErr);
+      // Sistem tetap berjalan normal menggunakan Master Prompt biasa jika RAG gagal
+    }
+
+    // 4. MASTER PROMPT SINKRONISASI (GABUNGAN SEMUA OTAK)
     const masterBasePrompt = `Kamu adalah Customer Success & Sales Representative profesional dari sebuah bisnis.
 
 === ATURAN BESI (HUKUM MUTLAK, DILARANG KERAS DILANGGAR) ===
 1. BATASAN PENGETAHUAN (ANTI-HALUSINASI):
-- Kamu HANYA TAHU apa yang tertulis di bagian "KONTEKS BISNIS KLIEN" dan "INFORMASI BISNIS TAMBAHAN".
+- Kamu HANYA TAHU apa yang tertulis di bagian "KONTEKS BISNIS KLIEN", "INFORMASI TAMBAHAN", dan "DOKUMEN REFERENSI".
 - JIKA pelanggan bertanya harga, spesifikasi, atau layanan yang TIDAK TERTULIS di konteks, DILARANG MENGARANG JAWABAN.
 - Jawab dengan: "Mohon maaf kak, untuk detail tersebut saya harus cek dulu ke tim inti kami ya. Ada hal lain yang bisa saya bantu?"
 
@@ -87,26 +127,20 @@ export async function POST(req: Request) {
 
 === KONTEKS BISNIS KLIEN (INSTRUKSI UTAMA) ===
 ${clientData.system_prompt || "Bot sedang dalam tahap konfigurasi. Mohon sapa pelanggan dengan ramah."}
-${addonText}`;
+${addonText}
+${ragContextText}`; // <-- INI RAG NYA DISUNTIKKAN KE SINI BOS!
 
     // ========================================================================
     // 🌟 SETUP AGENTIC TOOLS (DYNAMIC LOADING DARI DATABASE) 🌟
     // ========================================================================
-    
-    // Tarik daftar tool khusus untuk klien ini dari tabel client_agentic_tools
     const { data: enabledTools } = await supabase
       .from("client_agentic_tools")
       .select("tool_name")
       .eq("client_id", clientData.id)
-      .eq("is_active", true); // Hanya load yang statusnya aktif!
+      .eq("is_active", true); 
 
-    // Ubah data tabel menjadi array string biasa, misal: ["cek_stok_internal"]
     const activeToolNames = enabledTools?.map(t => t.tool_name) || [];
-    
-    // (Opsional) Jika di database belum ada settingan sama sekali, Bos bisa pasang default fallback di sini
-    // const finalTools = activeToolNames.length > 0 ? activeToolNames : ["cek_stok_internal"];
     const finalTools = activeToolNames;
-
     const geminiTools = getGeminiToolsConfig(finalTools);
 
     const modelOptions: any = { model: "gemini-2.5-flash", systemInstruction: masterBasePrompt };
@@ -124,7 +158,7 @@ ${addonText}`;
     const chat = model.startChat({ history: safeHistory });
     const result = await chat.sendMessage(message);
     let response = await result.response;
-    let reply = "";
+    let reply: string = "";
 
     // ========================================================================
     // 🌟 THE AGENTIC INTERCEPTION (MENANGKAP FUNGSI AI) 🌟
@@ -132,15 +166,12 @@ ${addonText}`;
     const functionCalls = response.functionCalls();
     
     if (functionCalls && functionCalls.length > 0) {
-      // AI meminta bantuan Tool!
       const call = functionCalls[0];
       console.log(`[AGENTIC] 🤖 Gemini meminta eksekusi tool: ${call.name} dengan args:`, call.args);
 
       try {
-        // 1. Jalankan Tool di sistem kita
         const toolResult = await executeAgenticCall(call.name, call.args, clientData);
         
-        // 2. Kirim kembali hasil database/logic kita ke Gemini
         const step2Result = await chat.sendMessage([{
           functionResponse: {
             name: call.name,
@@ -148,7 +179,6 @@ ${addonText}`;
           }
         }]);
 
-        // 3. Ambil jawaban akhir yang sudah dirangkai rapi oleh AI
         response = await step2Result.response;
         reply = response.text();
       } catch (err) {
@@ -156,7 +186,6 @@ ${addonText}`;
         reply = "Maaf, sistem internal kami sedang gangguan saat mengecek data tersebut ya Kak. Mohon tunggu sebentar.";
       }
     } else {
-      // AI membalas obrolan biasa tanpa tool
       reply = response.text();
     }
 
@@ -188,7 +217,7 @@ ${addonText}`;
 }
 
 // ============================================================================
-// FUNGSI BACKGROUND EKSTRAKSI LEAD (SMART APPEND LOGIC)
+// FUNGSI BACKGROUND EKSTRAKSI LEAD (TETAP SAMA SEPERTI MILIK BOS)
 // ============================================================================
 async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[]) {
   try {

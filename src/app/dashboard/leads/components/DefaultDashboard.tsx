@@ -10,6 +10,7 @@ import RefreshEngine from "./ui/RefreshEngine";
 import WeeklyAnalyticsChart from "./ui/WeeklyAnalyticsChart";
 import LiveChat from "./ui/LiveChat";
 import EmergencyContact from "./ui/EmergencyContact";
+import RAGTrainer from "./ui/RAGTrainer"; 
 
 export default function DefaultDashboard() {
   const [leads, setLeads] = useState<any[]>([]);
@@ -248,7 +249,7 @@ export default function DefaultDashboard() {
             </div>
           )}
 
-          {/* AI TRAINER INTI */}
+          {/* AI TRAINER INTI (MANUAL) */}
           <AITrainer 
             prompt={prompt} 
             setPrompt={setPrompt} 
@@ -258,7 +259,13 @@ export default function DefaultDashboard() {
           />
 
           {/* ========================================================
-              UI PENGATURAN NOTIFIKASI DARURAT (KOMPONEN TERPISAH)
+             UI RAG TRAINER (SUNTIK OTAK PDF)
+          ======================================================== */}
+          {/* Karena komponen RAGTrainer minta clientId berupa "slug" / string, kita lemparkan UUID asli dari state `clientId` ini (Pastikan API Bos bisa menerima ID ini). */}
+          <RAGTrainer clientId={clientId} />
+
+          {/* ========================================================
+             UI PENGATURAN NOTIFIKASI DARURAT
           ======================================================== */}
           <EmergencyContact 
              adminPhone={adminPhone}
