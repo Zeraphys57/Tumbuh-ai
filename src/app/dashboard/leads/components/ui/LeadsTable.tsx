@@ -105,60 +105,98 @@ export default function LeadsTable({
     doc.save(`Leads_Report_${formattedMonthText.replace(' ', '_')}.pdf`);
   };
 
-  // --- FUNGSI PARSER UNTUK MENGURAI CHAT STRING MENJADI BUBBLE UI ---
+  // ========================================================================
+  // 🌟 FIX CLAUDE: PARSER CHAT LOG SUPER CERDAS 🌟
+  // ========================================================================
   const renderChatLog = (chatText: string) => {
     if (!chatText) return (
       <div className="p-8 bg-slate-50 rounded-[2rem] border-2 border-slate-100 text-slate-400 italic text-center shadow-inner">
-        Riwayat obrolan tidak ditemukan di tabel ini. Pastikan sistem Anda menarik kolom `full_chat`.
+        Riwayat obrolan tidak ditemukan di tabel ini.
       </div>
     );
-
-    // Format chat biasanya berbunyi:
-    // User: pesan user
-    // Bot: pesan bot
-    const lines = chatText.split('\n').filter(line => line.trim() !== "");
-
-    return lines.map((line, i) => {
-      const isUser = line.toLowerCase().startsWith("user:");
-      const isBot = line.toLowerCase().startsWith("bot:");
+    
+    type ChatMessage = { role: 'user' | 'bot' | 'system'; text: string };
+    const messages: ChatMessage[] = [];
+    let currentRole: 'user' | 'bot' | null = null;
+    let currentLines: string[] = [];
+    
+    const flushCurrent = () => {
+      if (currentRole && currentLines.length > 0) {
+        messages.push({ role: currentRole, text: currentLines.join('\n').trim() });
+        currentLines = [];
+      }
+    };
+    
+    for (const line of chatText.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
       
-      // Bersihkan awalan "User:" atau "Bot:"
-      let cleanMsg = line.replace(/^(User:|Bot:)/i, "").trim();
+      if (
+        trimmed.includes('--- Sesi Obrolan Baru ---') ||
+        trimmed.includes('[History Lama Dipangkas]') ||
+        trimmed.startsWith('---')
+      ) {
+        flushCurrent();
+        currentRole = null;
+        messages.push({ role: 'system', text: trimmed.replace(/^-+|-+$/g, '').trim() });
+        continue;
+      }
       
-      // PARSING MARKDOWN MANUAL (Ubah ** jadi bold, * jadi italic)
-      let htmlMsg = cleanMsg;
-      htmlMsg = htmlMsg.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      htmlMsg = htmlMsg.replace(/\*(.*?)\*/g, '<i>$1</i>');
-
-      if (isUser) {
+      if (/^user:/i.test(trimmed)) {
+        flushCurrent();
+        currentRole = 'user';
+        currentLines.push(trimmed.replace(/^user:/i, '').trim());
+      } else if (/^bot:/i.test(trimmed)) {
+        flushCurrent();
+        currentRole = 'bot';
+        currentLines.push(trimmed.replace(/^bot:/i, '').trim());
+      } else {
+        if (currentRole) currentLines.push(trimmed);
+      }
+    }
+    
+    flushCurrent();
+    
+    if (messages.length === 0) {
+      return <div className="p-8 text-slate-400 italic text-center">Format chat tidak dikenali.</div>;
+    }
+    
+    const formatHtml = (text: string) =>
+      text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<i>$1</i>')
+        .replace(/\n/g, '<br/>');
+        
+    return messages.map((msg, i) => {
+      if (msg.role === 'system') {
+        return (
+          <div key={i} className="flex justify-center my-4 opacity-70">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] bg-white px-6 py-2 rounded-full border border-slate-200 shadow-sm">
+              {msg.text || 'Sesi Baru'}
+            </span>
+          </div>
+        );
+      }
+      
+      if (msg.role === 'user') {
         return (
           <div key={i} className="flex justify-end w-full">
-            <div 
-              className="bg-indigo-600 text-white py-3 px-5 rounded-2xl rounded-tr-sm max-w-[80%] shadow-sm text-[13px] font-medium leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: htmlMsg }}
-            />
-          </div>
-        );
-      } else if (isBot) {
-        return (
-          <div key={i} className="flex justify-start w-full">
-            <div 
-              className="bg-slate-100 text-slate-700 py-3 px-5 rounded-2xl rounded-tl-sm max-w-[85%] border border-slate-200 shadow-sm text-[13px] font-medium leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: htmlMsg }}
-            />
-          </div>
-        );
-      } else {
-        // Jika tidak ada awalan "User:" atau "Bot:", anggap ini kelanjutan pesan Bot (Paragraf baru)
-        return (
-          <div key={i} className="flex justify-start w-full mt-[-8px]">
-            <div 
-              className="bg-slate-100 text-slate-700 py-3 px-5 rounded-2xl rounded-tl-sm max-w-[85%] border border-slate-200 shadow-sm text-[13px] font-medium leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: htmlMsg }}
+            <div
+              className="bg-indigo-600 text-white py-3.5 px-6 rounded-3xl rounded-tr-sm max-w-[80%] shadow-md text-[13px] font-medium leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: formatHtml(msg.text) }}
             />
           </div>
         );
       }
+      
+      return (
+        <div key={i} className="flex justify-start w-full">
+          <div
+            className="bg-white text-slate-700 py-3.5 px-6 rounded-3xl rounded-tl-sm max-w-[85%] border border-slate-200 shadow-sm text-[13px] font-medium leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: formatHtml(msg.text) }}
+          />
+        </div>
+      );
     });
   };
 

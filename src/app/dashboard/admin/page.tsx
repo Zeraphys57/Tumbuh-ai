@@ -5,31 +5,30 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import Link from "next/link";
 
-// ============================================================================
-// DAFTAR 11 SENJATA AGENTIC TUMBUH.AI
-// ============================================================================
 const AVAILABLE_TOOLS = [
   { id: "check_stock", name: "Cek Stok Barang", category: "Gudang & Transaksi" },
   { id: "buat_pesanan", name: "Kasir & Checkout", category: "Gudang & Transaksi" },
   { id: "calculate_shipping", name: "Kalkulator Ongkir", category: "Gudang & Transaksi" },
-  
   { id: "check_schedule", name: "Radar Jadwal", category: "Reservasi & Jasa" },
   { id: "make_booking", name: "Auto-Booking", category: "Reservasi & Jasa" },
   { id: "cancel_booking", name: "Batal / Reschedule", category: "Reservasi & Jasa" },
   { id: "calculate_custom_price", name: "Estimasi Harga Kustom", category: "Reservasi & Jasa" },
-  
   { id: "check_order_status", name: "Pelacak Pesanan", category: "Pelanggan & CS" },
   { id: "register_member", name: "Daftar Member VIP", category: "Pelanggan & CS" },
   { id: "check_points", name: "Cek Poin & Promo", category: "Pelanggan & CS" },
-  
   { id: "panggil_admin", name: "Panggil Admin (WA)", category: "Eskalasi Darurat" },
 ];
 
+const IDR_RATE_PER_TOKEN = parseFloat(process.env.NEXT_PUBLIC_IDR_RATE_PER_TOKEN || "0.015"); 
+const BANK_NAME = process.env.NEXT_PUBLIC_BANK_NAME || "Bank BCA";
+const BANK_ACCOUNT = process.env.NEXT_PUBLIC_BANK_ACCOUNT || "123-456-7890 a/n Bryan Jacquellino";
+
 export default function SuperAdminDashboard() {
-  const supabase = createBrowserClient(
+  
+  const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  ), []);
 
   const [allStats, setAllStats] = useState<any[]>([]);
   const [adminLogs, setAdminLogs] = useState<any[]>([]); 
@@ -44,15 +43,17 @@ export default function SuperAdminDashboard() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // State Modal Hapus
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<{id: string, name: string} | null>(null);
   const [challengeInput, setChallengeInput] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // State Modal AI Tools
   const [isToolModalOpen, setIsToolModalOpen] = useState(false);
   const [selectedClientForTools, setSelectedClientForTools] = useState<{id: string, name: string, activeTools: string[]} | null>(null);
+
+  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
+  const [inputModal, setInputModal] = useState<{isOpen: boolean, title: string, message: string, defaultValue: string, onSubmit: (val: string) => void} | null>(null);
+  const [modalInputValue, setModalInputValue] = useState("");
 
   const getFormattedMonthName = (yearMonthStr: string) => {
     const [year, month] = yearMonthStr.split('-');
@@ -60,7 +61,6 @@ export default function SuperAdminDashboard() {
   };
 
   const currentMonthName = getFormattedMonthName(selectedMonth);
-  const IDR_RATE_PER_TOKEN = 15000 / 1000000; 
 
   const planPrices: Record<string, number> = {
     "Basic": 499000,
@@ -68,9 +68,6 @@ export default function SuperAdminDashboard() {
     "Enterprise": 2999000,
   };
   
-  // ========================================================
-  // PENCATAT LOG AKTIVITAS
-  // ========================================================
   const logAdminAction = async (actionType: string, targetClient: string, details: string) => {
     try {
       const newLog = {
@@ -93,11 +90,75 @@ export default function SuperAdminDashboard() {
     window.location.href = "/login";
   };
 
-  // ========================================================
-  // TOGGLE AI TOOLS (DYNAMIC LOADING CONTROL)
-  // ========================================================
+  const changeClientPlan = (clientId: string, currentPlan: string, clientName: string, newPlan: string) => {
+    if (currentPlan === newPlan) return;
+    
+    setConfirmModal({
+      isOpen: true,
+      title: "Ubah Paket Langganan",
+      message: `Yakin ingin mengubah paket ${clientName} dari ${currentPlan} menjadi ${newPlan}?`,
+      onConfirm: async () => {
+        const { error } = await supabase.from("clients").update({ plan_type: newPlan }).eq("id", clientId);
+        if (!error) {
+          setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, plan: newPlan } : stat));
+          logAdminAction("UPDATE_PLAN", clientName, `Ubah paket langganan: ${currentPlan} -> ${newPlan}`);
+        } else {
+          alert("Gagal merubah paket: " + error.message);
+        }
+        setConfirmModal(null);
+      }
+    });
+  };
+
+  const toggleSuspend = (clientId: string, isCurrentlyActive: boolean, clientName: string) => {
+    const newStatus = !isCurrentlyActive;
+    const msg = newStatus ? "Aktifkan ulang layanan untuk klien ini?" : "SUSPEND klien ini? (Bot mati total!)";
+    
+    setConfirmModal({
+      isOpen: true,
+      title: newStatus ? "Aktivasi Layanan" : "Suspend Layanan",
+      message: msg,
+      onConfirm: async () => {
+        const { error } = await supabase.from("clients").update({ is_active: newStatus }).eq("id", clientId);
+        if (!error) {
+          setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, isActive: newStatus } : stat));
+          logAdminAction("TOGGLE_SUSPEND", clientName, `Status klien diubah jadi: ${newStatus ? 'ACTIVE' : 'SUSPENDED'}`);
+        }
+        setConfirmModal(null);
+      }
+    });
+  };
+
+  const adjustChatLimit = (clientId: string, currentLimit: number, clientName: string) => {
+    setModalInputValue(currentLimit.toString());
+    setInputModal({
+      isOpen: true,
+      title: "Ubah Limit Chat",
+      message: `Masukkan batas chat bulanan baru untuk klien ${clientName}:`,
+      defaultValue: currentLimit.toString(),
+      onSubmit: async (inputValue) => {
+        const newLimit = parseInt(inputValue);
+        if (isNaN(newLimit) || newLimit < 0) {
+          alert("Masukkan angka yang valid!");
+          return;
+        }
+        const { error } = await supabase.from("clients").update({ monthly_limit: newLimit }).eq("id", clientId);
+        if (!error) {
+          setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, limit: newLimit } : stat));
+          logAdminAction("ADJUST_LIMIT", clientName, `Ubah limit bulanan: ${currentLimit} -> ${newLimit}`);
+        }
+        setInputModal(null);
+      }
+    });
+  };
+
+  // [FIX] Mengembalikan fungsi openToolModal yang sempat terpotong!
   const openToolModal = (client: any) => {
-    setSelectedClientForTools({ id: client.id, name: client.name, activeTools: client.activeTools || [] });
+    setSelectedClientForTools({ 
+      id: client.id, 
+      name: client.name, 
+      activeTools: client.activeTools || [] 
+    });
     setIsToolModalOpen(true);
   };
 
@@ -107,8 +168,9 @@ export default function SuperAdminDashboard() {
     const clientId = selectedClientForTools.id;
     const isCurrentlyActive = selectedClientForTools.activeTools.includes(toolId);
     const newStatus = !isCurrentlyActive;
+    
+    const previousTools = [...selectedClientForTools.activeTools];
 
-    // 1. Optimistic UI Update
     const updatedTools = newStatus 
       ? [...selectedClientForTools.activeTools, toolId] 
       : selectedClientForTools.activeTools.filter(t => t !== toolId);
@@ -116,7 +178,6 @@ export default function SuperAdminDashboard() {
     setSelectedClientForTools({ ...selectedClientForTools, activeTools: updatedTools });
     setAllStats(prev => prev.map(s => s.id === clientId ? { ...s, activeTools: updatedTools } : s));
 
-    // 2. Database Update
     const { data: existing } = await supabase
       .from("client_agentic_tools")
       .select("id")
@@ -124,13 +185,22 @@ export default function SuperAdminDashboard() {
       .eq("tool_name", toolId)
       .maybeSingle();
 
+    let dbError = null;
     if (existing) {
-      await supabase.from("client_agentic_tools").update({ is_active: newStatus }).eq("id", existing.id);
+      const { error } = await supabase.from("client_agentic_tools").update({ is_active: newStatus }).eq("id", existing.id);
+      dbError = error;
     } else {
-      await supabase.from("client_agentic_tools").insert({ client_id: clientId, tool_name: toolId, is_active: newStatus });
+      const { error } = await supabase.from("client_agentic_tools").insert({ client_id: clientId, tool_name: toolId, is_active: newStatus });
+      dbError = error;
     }
 
-    logAdminAction("TOGGLE_AI_TOOL", selectedClientForTools.name, `${newStatus ? 'MENGAKTIFKAN' : 'MEMATIKAN'} Alat AI: ${toolId}`);
+    if (dbError) {
+       setSelectedClientForTools({ ...selectedClientForTools, activeTools: previousTools });
+       setAllStats(prev => prev.map(s => s.id === clientId ? { ...s, activeTools: previousTools } : s));
+       alert("Gagal mengubah status tool: " + dbError.message);
+    } else {
+       logAdminAction("TOGGLE_AI_TOOL", selectedClientForTools.name, `${newStatus ? 'MENGAKTIFKAN' : 'MEMATIKAN'} Alat AI: ${toolId}`);
+    }
   };
 
   const toggleAddon = async (clientId: string, currentFeatures: any, status: boolean, clientName: string) => {
@@ -152,31 +222,6 @@ export default function SuperAdminDashboard() {
       setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, premiumQuota: currentQuota } : stat));
     } else {
       logAdminAction("ADJUST_QUOTA", clientName, `Ubah kuota premium: ${currentQuota} -> ${newQuota}`);
-    }
-  };
-
-  const adjustChatLimit = async (clientId: string, currentLimit: number, clientName: string) => {
-    const input = prompt("Masukkan batas chat bulanan baru untuk klien ini:", currentLimit.toString());
-    if (!input) return;
-    const newLimit = parseInt(input);
-    if (isNaN(newLimit)) return;
-
-    const { error } = await supabase.from("clients").update({ monthly_limit: newLimit }).eq("id", clientId);
-    if (!error) {
-      setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, limit: newLimit } : stat));
-      logAdminAction("ADJUST_LIMIT", clientName, `Ubah limit bulanan: ${currentLimit} -> ${newLimit}`);
-    }
-  };
-
-  const toggleSuspend = async (clientId: string, isCurrentlyActive: boolean, clientName: string) => {
-    const newStatus = !isCurrentlyActive;
-    const msg = newStatus ? "Aktifkan ulang layanan untuk klien ini?" : "🚨 SUSPEND klien ini? (Bot mati total!)";
-    if (!confirm(msg)) return;
-
-    const { error } = await supabase.from("clients").update({ is_active: newStatus }).eq("id", clientId);
-    if (!error) {
-      setAllStats(prev => prev.map(stat => stat.id === clientId ? { ...stat, isActive: newStatus } : stat));
-      logAdminAction("TOGGLE_SUSPEND", clientName, `Status klien diubah jadi: ${newStatus ? 'ACTIVE' : 'SUSPENDED'}`);
     }
   };
 
@@ -208,7 +253,11 @@ export default function SuperAdminDashboard() {
       setLoading(true);
       
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) setAdminEmail(user.email || "Unknown Admin");
+      if (!user) {
+         window.location.href = "/login";
+         return;
+      }
+      setAdminEmail(user.email || "Unknown Admin");
 
       const [year, month] = selectedMonth.split('-');
       const startDate = new Date(parseInt(year), parseInt(month) - 1, 1).toISOString();
@@ -217,8 +266,6 @@ export default function SuperAdminDashboard() {
       const { data: clientsData } = await supabase.from("clients").select("*");
       const { data: logsData } = await supabase.from("usage_logs").select("total_tokens, client_id").gte("created_at", startDate).lte("created_at", endDate);
       const { data: adminLogsData } = await supabase.from("admin_logs").select("*").order("created_at", { ascending: false }).limit(15);
-      
-      // Fetch Tools Aktif milik semua klien
       const { data: toolsData } = await supabase.from("client_agentic_tools").select("*").eq("is_active", true);
 
       if (adminLogsData) setAdminLogs(adminLogsData);
@@ -229,7 +276,6 @@ export default function SuperAdminDashboard() {
           const totalTokens = clientLogs.reduce((sum, log) => sum + (log.total_tokens || 0), 0);
           const totalChat = clientLogs.length;
 
-          // Tools milik klien ini
           const clientActiveTools = toolsData?.filter(t => t.client_id === client.id).map(t => t.tool_name) || [];
 
           const avgTokensPerChat = totalChat > 0 ? totalTokens / totalChat : 0;
@@ -260,7 +306,8 @@ export default function SuperAdminDashboard() {
       setLoading(false);
     }
     fetchMasterData();
-  }, [supabase, selectedMonth]); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth]); 
 
   const grandTotalTokens = allStats.reduce((acc, curr) => acc + curr.totalTokens, 0);
   const grandTotalChats = allStats.reduce((acc, curr) => acc + curr.totalChat, 0);
@@ -358,7 +405,7 @@ export default function SuperAdminDashboard() {
     doc.setTextColor(50);
     doc.text("Silakan transfer ke rekening berikut sebelum tanggal 5:", 14, finalY + 15);
     doc.setFont("helvetica", "normal");
-    doc.text("Bank BCA: 123-456-7890 a/n Bryan Jacquellino", 14, finalY + 20);
+    doc.text(`${BANK_NAME}: ${BANK_ACCOUNT}`, 14, finalY + 20);
     
     logAdminAction("DOWNLOAD_INVOICE", client.name, `Mencetak Invoice Tagihan untuk bulan ${currentMonthName}`);
     doc.save(`Invoice_${client.name}_${currentMonthName}.pdf`);
@@ -370,15 +417,49 @@ export default function SuperAdminDashboard() {
     if (type.includes('ADJUST')) return 'bg-blue-100 text-blue-600 border-blue-200';
     if (type === 'TOGGLE_ADDON') return 'bg-emerald-100 text-emerald-600 border-emerald-200';
     if (type === 'TOGGLE_AI_TOOL') return 'bg-indigo-100 text-indigo-600 border-indigo-200';
+    if (type === 'UPDATE_PLAN') return 'bg-purple-100 text-purple-600 border-purple-200';
     return 'bg-slate-100 text-slate-600 border-slate-200';
   };
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-8 font-sans pb-20 relative">
       
-      {/* ========================================================
-          MODAL KELOLA AI TOOLS
-      ======================================================== */}
+      {/* 1. CONFIRM MODAL */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-slate-800 mb-2">{confirmModal.title}</h3>
+            <p className="text-sm font-medium text-slate-500 mb-8">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmModal(null)} className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Batal</button>
+              <button onClick={confirmModal.onConfirm} className="flex-1 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all">Ya, Lanjutkan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. INPUT PROMPT MODAL */}
+      {inputModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-slate-800 mb-2">{inputModal.title}</h3>
+            <p className="text-sm font-medium text-slate-500 mb-4">{inputModal.message}</p>
+            <input 
+              type="number" 
+              value={modalInputValue} 
+              onChange={(e) => setModalInputValue(e.target.value)} 
+              className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl py-3 px-4 font-bold text-slate-800 focus:border-blue-500 outline-none mb-8"
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setInputModal(null)} className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Batal</button>
+              <button onClick={() => inputModal.onSubmit(modalInputValue)} className="flex-1 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KELOLA AI TOOLS */}
       {isToolModalOpen && selectedClientForTools && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
@@ -411,7 +492,6 @@ export default function SuperAdminDashboard() {
                         <code className="text-xs text-slate-400 mt-1 block">{tool.id}</code>
                       </div>
                       
-                      {/* TOGGLE SWITCH STYLE */}
                       <button onClick={() => toggleAgenticTool(tool.id)} className={`relative w-14 h-8 rounded-full transition-colors duration-300 focus:outline-none ${isActive ? 'bg-blue-500' : 'bg-slate-300'}`}>
                         <span className={`absolute left-1 top-1 w-6 h-6 bg-white rounded-full transition-transform duration-300 shadow-sm ${isActive ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
@@ -548,10 +628,10 @@ export default function SuperAdminDashboard() {
                 <tr><td colSpan={6} className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase">Memuat Sistem Radar...</td></tr>
               ) : filteredAndSortedStats.length === 0 ? (
                 <tr><td colSpan={6} className="p-20 text-center font-bold text-slate-400">Tidak ada klien yang cocok dengan pencarian.</td></tr>
-              ) : filteredAndSortedStats.map((stat, idx) => {
+              ) : filteredAndSortedStats.map((stat) => {
                 const overCount = Math.max(0, stat.totalChat - stat.limit);
                 return (
-                  <tr key={idx} className={`transition-all duration-300 ${!stat.isActive ? 'bg-red-50/30 opacity-75' : 'hover:bg-blue-50/30'}`}>
+                  <tr key={stat.id} className={`transition-all duration-300 ${!stat.isActive ? 'bg-red-50/30 opacity-75' : 'hover:bg-blue-50/30'}`}>
                     <td className="px-6 py-6">
                       <div className="flex items-center justify-between gap-4">
                         <div>
@@ -559,7 +639,18 @@ export default function SuperAdminDashboard() {
                             {stat.name}
                             {!stat.isActive && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded uppercase tracking-widest">Suspended</span>}
                           </p>
-                          <span className="text-[10px] font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">{stat.plan}</span>
+                          
+                          <div className="mt-1">
+                            <select 
+                              value={stat.plan}
+                              onChange={(e) => changeClientPlan(stat.id, stat.plan, stat.name, e.target.value)}
+                              className="text-[10px] font-bold text-blue-700 uppercase bg-blue-50 px-2 py-1 rounded cursor-pointer outline-none border border-blue-200 hover:border-blue-400 transition-colors shadow-sm"
+                            >
+                              <option value="Basic">Basic</option>
+                              <option value="Pro">Pro</option>
+                              <option value="Enterprise">Enterprise</option>
+                            </select>
+                          </div>
                         </div>
                         <button onClick={() => toggleSuspend(stat.id, stat.isActive, stat.name)} className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-all ${stat.isActive ? 'bg-red-50 text-red-500 hover:bg-red-500 hover:text-white' : 'bg-green-500 text-white hover:bg-green-600'}`} title={stat.isActive ? "Suspend Klien" : "Aktifkan Klien"}>
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -651,8 +742,9 @@ export default function SuperAdminDashboard() {
                  <tbody className="divide-y divide-slate-800">
                     {adminLogs.length === 0 ? (
                        <tr><td colSpan={5} className="p-10 text-center text-slate-500 font-medium italic">Belum ada riwayat aktivitas.</td></tr>
-                    ) : adminLogs.map((log, idx) => (
-                       <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                    ) : adminLogs.map((log) => (
+                       // [FIX] Menggunakan created_at sebagai ID unik yang stabil
+                       <tr key={log.created_at} className="hover:bg-slate-800/30 transition-colors">
                           <td className="px-8 py-4 text-slate-400 text-xs font-mono">
                              {new Date(log.created_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </td>

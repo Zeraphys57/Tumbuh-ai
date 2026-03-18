@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 // --- INTERFACES ---
@@ -20,7 +20,7 @@ interface ChatMessage {
   date: string;
 }
 
-const MESSAGES_PER_PAGE = 50; // Batas limit chat yang ditarik
+const MESSAGES_PER_PAGE = 50; 
 
 export default function LiveChat() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -31,56 +31,71 @@ export default function LiveChat() {
   const [clientId, setClientId] = useState("");
   const [clientSlug, setClientSlug] = useState("");
 
-  // State untuk Infinite Scroll
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
 
-  // Refs untuk Scroll & Realtime
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activePhoneRef = useRef<string | null>(null);
+  
+  // [FIX 4]: THROTTLE SCROLL REF (Anti Spam Query DB)
+  const scrollThrottleRef = useRef<NodeJS.Timeout | null>(null);
 
-  const supabase = createBrowserClient(
+  // [FIX 1]: MENGGUNAKAN USEMEMO AGAR SUPABASE CLIENT STABIL (Anti Memory Leak)
+  const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  ), []);
 
-  // Update Ref untuk kebutuhan Realtime
   useEffect(() => {
     activePhoneRef.current = activePhone;
   }, [activePhone]);
 
-  // 1. FETCH INISIAL (LEADS SAJA) & REALTIME SETUP
+  // 1. FETCH INISIAL & REALTIME SETUP
   useEffect(() => {
     let channel: any;
 
     const fetchInitialData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const cId = user.user_metadata?.client_id;
-      setClientId(cId);
 
-      // Ambil Slug Client
-      const { data: client } = await supabase.from('clients').select('slug').eq('id', cId).single();
-      if (client) setClientSlug(client.slug);
+      // [FIX 2]: SECURITY GUARD - Ambil Client ID dari tabel, BUKAN dari user_metadata!
+      const { data: clientData } = await supabase
+        .from('clients')
+        .select('id, slug')
+        .eq('email', user.email)
+        .maybeSingle();
+
+      // Fallback aman jika pakai sistem mapping lain
+      const cId = clientData?.id || user.id; 
+      const slug = clientData?.slug || "";
+
+      setClientId(cId);
+      setClientSlug(slug);
 
       // Ambil Daftar Leads
-      const { data: leadsData } = await supabase.from('leads').select('*').eq('client_id', cId).order('created_at', { ascending: false });
+      const { data: leadsData } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('client_id', cId)
+        .order('created_at', { ascending: false });
+        
       if (leadsData) setLeads(leadsData);
 
       // --- SETUP REALTIME ---
-      if (client) {
+      if (slug) {
+        // [FIX 5]: NAMA CHANNEL UNIK PER USER AGAR TIDAK BENTROK SAAT MULTI-TAB
+        const channelName = `livechat_${cId}_${Date.now()}`;
+        
         channel = supabase
-          .channel('custom-all-channel')
+          .channel(channelName)
           .on(
             'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'chat_logs', filter: `client_id=eq.${client.slug}` },
+            { event: 'INSERT', schema: 'public', table: 'chat_logs', filter: `client_id=eq.${slug}` },
             (payload) => {
-              // Hanya render pesan baru jika chat room orang tersebut sedang dibuka
               if (payload.new.customer_phone === activePhoneRef.current) {
                 setChatLogs((prev) => [...prev, payload.new]);
-                // Scroll otomatis ke bawah kalau ada pesan baru
                 setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
               }
             }
@@ -107,7 +122,7 @@ export default function LiveChat() {
     };
   }, [supabase]);
 
-  // 2. FETCH CHAT LOGS KETIKA KONTAK DI-KLIK (LIMIT 50)
+  // 2. FETCH CHAT LOGS
   useEffect(() => {
     if (!activePhone || !clientSlug) return;
 
@@ -121,26 +136,31 @@ export default function LiveChat() {
         .select('*')
         .eq('client_id', clientSlug)
         .eq('customer_phone', activePhone)
-        .order('created_at', { ascending: false }) // Ambil dari yang paling baru
+        .order('created_at', { ascending: false }) 
         .range(0, MESSAGES_PER_PAGE - 1);
 
       if (data) {
-        setChatLogs(data.reverse()); // Balik urutannya agar yang terlama di atas
+        setChatLogs(data.reverse()); 
         setOffset(MESSAGES_PER_PAGE);
         setHasMore(data.length === MESSAGES_PER_PAGE);
-        // Scroll ke paling bawah
         setTimeout(() => messagesEndRef.current?.scrollIntoView(), 100);
       }
     };
 
     fetchInitialChats();
-  }, [activePhone, clientSlug]);
+  }, [activePhone, clientSlug, supabase]);
 
-  // 3. FUNGSI LOAD MORE (SCROLL KE ATAS)
+  // 3. FUNGSI LOAD MORE DENGAN THROTTLE (ANTI SPAM)
   const handleScroll = async () => {
+    // [FIX 4]: THROTTLE SCROLL AGAR DATABASE TIDAK DI-SPAM REQUEST
+    if (scrollThrottleRef.current) return; 
+    
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null;
+    }, 300);
+
     if (!chatContainerRef.current || !activePhone || !clientSlug || isLoadingMore || !hasMore) return;
 
-    // Jika scroll mentok ke atas
     if (chatContainerRef.current.scrollTop === 0) {
       setIsLoadingMore(true);
       const prevScrollHeight = chatContainerRef.current.scrollHeight;
@@ -159,7 +179,6 @@ export default function LiveChat() {
         setOffset(prevOffset => prevOffset + data.length);
         setHasMore(data.length === MESSAGES_PER_PAGE);
 
-        // Pertahankan posisi scroll agar tidak loncat ke atas
         setTimeout(() => {
           if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight - prevScrollHeight;
@@ -172,14 +191,13 @@ export default function LiveChat() {
     }
   };
 
-  // 4. MAPPING LOGIKA DATABASE KE BALON CHAT UI + TIMESTAMP
   const activeLead = leads.find(l => l.customer_phone === activePhone);
   const activeMessages: ChatMessage[] = [];
 
   chatLogs.forEach(log => {
     const dateObj = new Date(log.created_at);
     const time = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    const date = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }); // cth: "12 Maret 2026"
+    const date = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }); 
     
     if (log.message) {
       activeMessages.push({ id: `${log.id}-in`, sender: 'customer', text: log.message, time, date });
@@ -189,7 +207,6 @@ export default function LiveChat() {
     }
   });
 
-  // 5. FUNGSI SAKLAR TAKE OVER AI
   const toggleAiStatus = async () => {
     if (!activeLead) return;
     const newStatus = !activeLead.is_bot_active;
@@ -197,19 +214,19 @@ export default function LiveChat() {
     await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
   };
 
-// 6. FUNGSI KIRIM PESAN MANUAL
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !activeLead || !clientSlug) return;
 
+    // [FIX 3]: GUARD KIRIM PESAN SAAT AI AKTIF
+    if (activeLead.is_bot_active) {
+      alert("⚠️ Harap 'Take Over Chat' (Matikan AI) terlebih dahulu sebelum membalas pesan pelanggan secara manual!");
+      return;
+    }
+
     const sentText = inputText;
-    setInputText(""); // Kosongkan input form langsung
+    setInputText(""); 
 
-    // --- BAGIAN FAKE ID & SET CHAT LOGS LOKAL DIHAPUS ---
-    // Karena Supabase Channel di useEffect atas akan otomatis menangkap INSERT ini 
-    // dan merender balon chatnya dalam hitungan milidetik!
-
-    // 1. Simpan ke Database
     const { error: dbError } = await supabase.from('chat_logs').insert({
         client_id: clientSlug,
         customer_phone: activePhone,
@@ -224,12 +241,9 @@ export default function LiveChat() {
       return;
     }
 
-    // Scroll otomatis ke bawah setelah ngirim
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
 
-    // 2. Tembak API Meta (WhatsApp/IG)
     try {
-      // Pastikan API send-manual kamu sudah ada di folder ini ya!
       const apiUrl = activeLead.platform === 'instagram' ? '/api/instagram/send-manual' : '/api/whatsapp/send-manual';
       await fetch(apiUrl, {
         method: 'POST',
@@ -251,7 +265,15 @@ export default function LiveChat() {
           <p className="text-[10px] uppercase tracking-widest text-slate-400 mt-1">Live Monitor</p>
         </div>
         
-        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide relative">
+          {/* [FIX 6]: EMPTY STATE SAAT BELUM ADA LEAD */}
+          {leads.length === 0 && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center opacity-40">
+              <svg className="w-12 h-12 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
+              <p className="text-xs text-slate-400 font-bold tracking-widest uppercase italic">Belum ada leads masuk</p>
+            </div>
+          )}
+
           {leads.map((lead) => (
             <div 
               key={lead.id} 
@@ -280,7 +302,6 @@ export default function LiveChat() {
         <div className="w-2/3 flex flex-col bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed relative">
           <div className="absolute inset-0 bg-slate-950/90 pointer-events-none z-0"></div>
           
-          {/* Header Chat Room */}
           <div className="px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur-md flex justify-between items-center z-10">
             <div>
               <h2 className="font-bold text-lg text-white">
@@ -302,21 +323,18 @@ export default function LiveChat() {
             </button>
           </div>
 
-          {/* Area Balon Chat (Infinite Scroll Div) */}
           <div 
             ref={chatContainerRef}
             onScroll={handleScroll}
             className="flex-1 overflow-y-auto p-6 space-y-4 z-10 scrollbar-hide"
           >
-            {/* Indikator Loading saat scroll ke atas */}
             {isLoadingMore && (
-              <div className="text-center text-xs text-slate-500 my-2 animate-pulse">
+              <div className="text-center text-xs text-slate-500 my-2 animate-pulse uppercase tracking-widest font-bold">
                 Memuat pesan lama...
               </div>
             )}
 
             {activeMessages.map((msg, index) => {
-              // Logika Pemisah Tanggal (Date Divider)
               const isFirstMsgOfDay = index === 0 || activeMessages[index - 1].date !== msg.date;
 
               return (
@@ -350,28 +368,28 @@ export default function LiveChat() {
                 </React.Fragment>
               );
             })}
-            {/* Jangkar untuk autoscroll ke bawah */}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Area Ketik Pesan */}
           <div className="p-4 bg-slate-900/80 border-t border-white/10 backdrop-blur-md z-10">
             {!activeLead.is_bot_active && (
                <div className="mb-2 text-[10px] text-orange-400 font-bold uppercase tracking-widest animate-pulse flex items-center gap-1.5 px-2">
                  ⚠️ AI Paused. You are replying manually.
                </div>
             )}
-            <form onSubmit={handleSendMessage} className="flex gap-3 relative">
+            {/* Input form disabled jika AI sedang menyala */}
+            <form onSubmit={handleSendMessage} className={`flex gap-3 relative transition-all duration-300 ${activeLead.is_bot_active ? 'opacity-50 grayscale' : 'opacity-100'}`}>
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder={activeLead.is_bot_active ? "Take over untuk mengetik manual..." : `Ketik balasan untuk pelanggan ${activeLead.platform === 'instagram' ? 'di IG' : 'di WA'}...`}
-                className={`flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none transition-all ${!activeLead.is_bot_active ? 'focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500' : 'opacity-70 focus:opacity-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'}`}
+                disabled={activeLead.is_bot_active}
+                placeholder={activeLead.is_bot_active ? "Klik 'Take Over Chat' untuk membalas..." : `Ketik balasan untuk pelanggan ${activeLead.platform === 'instagram' ? 'di IG' : 'di WA'}...`}
+                className={`flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none transition-all ${!activeLead.is_bot_active ? 'focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-text' : 'cursor-not-allowed'}`}
               />
               <button 
                 type="submit"
-                disabled={!inputText.trim()}
+                disabled={!inputText.trim() || activeLead.is_bot_active}
                 className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm transition-all hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg disabled:hover:shadow-none"
               >
                 Send
@@ -381,8 +399,10 @@ export default function LiveChat() {
 
         </div>
       ) : (
-        <div className="w-2/3 flex items-center justify-center bg-slate-950 flex-col z-10 opacity-50">
-           <p className="text-slate-500 text-sm font-medium tracking-wide">Pilih obrolan untuk mulai memantau</p>
+        <div className="w-2/3 flex items-center justify-center bg-slate-950 flex-col z-10 opacity-50 relative">
+           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-20 pointer-events-none"></div>
+           <svg className="w-16 h-16 mb-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" /></svg>
+           <p className="text-slate-500 text-sm font-bold tracking-widest uppercase italic">Pilih obrolan untuk mulai memantau</p>
         </div>
       )}
     </div>

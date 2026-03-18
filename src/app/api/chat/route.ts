@@ -5,6 +5,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 // --- IMPORT GUDANG PERKAKAS AGENTIC ---
 import { getGeminiToolsConfig, executeAgenticCall } from "@/app/agentic/agentic-tools";
 export const maxDuration = 60;
+
 // ============================================================================
 // INISIALISASI PRODUCTION (VIP PASS)
 // ============================================================================
@@ -13,22 +14,51 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const rateLimitMap = new Map();
+// [FIX 2 & 5]: RATE LIMIT MAP DENGAN AUTO-CLEANUP (ANTI MEMORY LEAK)
+const rateLimitMap = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  rateLimitMap.forEach((timestamp, key) => {
+    if (now - timestamp > 60000) rateLimitMap.delete(key); // Hapus memori tiap menit
+  });
+}, 60 * 1000);
 
 export async function POST(req: Request) {
   try {
-    const { message, clientId, history } = await req.json();
+    const body = await req.json();
+    const { message, clientId, history } = body;
 
-    // 1. RATE LIMITING (ANTI SPAM)
+    // ========================================================================
+    // [FIX 2]: VALIDASI INPUT KERAS (KEAMANAN & BIAYA)
+    // ========================================================================
+    if (!message || !clientId) {
+      return NextResponse.json({ reply: "Sistem membutuhkan data yang lengkap." }, { status: 400 });
+    }
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return NextResponse.json({ reply: "Pesan tidak boleh kosong ya Kak 😊" }, { status: 400 });
+    }
+    // Cegah serangan "Prompt Injection" atau Spam Karakter
+    if (message.length > 2000) {
+      return NextResponse.json({ reply: "Wah, pesannya kepanjangan nih Kak. Bisa diringkas sedikit? 😊" }, { status: 400 });
+    }
+
+    // ========================================================================
+    // 1. RATE LIMITING (ANTI SPAM) - [FIX 3]: DIBUAT UNIK PER CLIENT + IP/USER
+    // ========================================================================
     const ip = req.headers.get("x-forwarded-for") || "anonymous";
+    // Gunakan gabungan ClientID dan IP agar adil buat semua klien
+    const rateLimitKey = `${clientId}_${ip}`; 
     const now = Date.now();
-    const lastRequest = rateLimitMap.get(ip);
+    const lastRequest = rateLimitMap.get(rateLimitKey);
+    
     if (lastRequest && now - lastRequest < 2000) { 
       return NextResponse.json({ reply: "Ketiknya pelan-pelan saja ya Kak... 🙏" }, { status: 429 });
     }
-    rateLimitMap.set(ip, now);
+    rateLimitMap.set(rateLimitKey, now);
 
+    // ========================================================================
     // 2. AMBIL DATA KLIEN DARI SLUG
+    // ========================================================================
     const { data: client, error: clientError } = await supabase
       .from("clients")
       .select("id, system_prompt, features, is_active") 
@@ -68,21 +98,20 @@ export async function POST(req: Request) {
     // ========================================================================
     let ragContextText = "";
     try {
-      // a. Ubah chat user jadi Vektor (Angka) dengan 1536 dimensi (Sesuai upgrade Bos!)
-      const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+      // [FIX 1: KRITIKAL]: MODEL HARUS KONSISTEN DENGAN SAAT UPLOAD!
+      const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
       const embedResult = await embeddingModel.embedContent({
         content: { role: "user", parts: [{ text: message }] },
-        taskType: "RETRIEVAL_QUERY", // Optimasi khusus untuk pencarian pertanyaan
-        outputDimensionality: 1536   // Disesuaikan dengan batas aman Supabase HNSW
-      } as any); // "Surat Sakti" Anti-TypeScript Error
+        taskType: "RETRIEVAL_QUERY", 
+        outputDimensionality: 1536 
+      } as any); 
       
       const queryVector = embedResult.embedding.values;
 
-      // b. Cari di tabel client_knowledge via RPC Supabase
       const { data: matchedDocs, error: matchError } = await supabase.rpc("match_client_knowledge", {
         query_embedding: queryVector,
-        match_threshold: 0.65, // Ambil dokumen yang kemiripannya minimal 65%
-        match_count: 3, // Ambil maksimal 3 potongan dokumen agar AI tidak kepenuhan memori
+        match_threshold: 0.65, 
+        match_count: 3, 
         p_client_id: clientData.id
       });
 
@@ -99,7 +128,6 @@ export async function POST(req: Request) {
       }
     } catch (ragErr) {
       console.error("RAG Search Engine Error:", ragErr);
-      // Sistem tetap berjalan normal menggunakan Master Prompt biasa jika RAG gagal
     }
 
     // 4. MASTER PROMPT SINKRONISASI (GABUNGAN SEMUA OTAK)
@@ -127,7 +155,7 @@ export async function POST(req: Request) {
 === KONTEKS BISNIS KLIEN (INSTRUKSI UTAMA) ===
 ${clientData.system_prompt || "Bot sedang dalam tahap konfigurasi. Mohon sapa pelanggan dengan ramah."}
 ${addonText}
-${ragContextText}`; // <-- INI RAG NYA DISUNTIKKAN KE SINI BOS!
+${ragContextText}`;
 
     // ========================================================================
     // 🌟 SETUP AGENTIC TOOLS (DYNAMIC LOADING DARI DATABASE) 🌟
@@ -149,9 +177,15 @@ ${ragContextText}`; // <-- INI RAG NYA DISUNTIKKAN KE SINI BOS!
 
     const model = genAI.getGenerativeModel(modelOptions);
 
-    const safeHistory = history
-      ? history.filter((msg: any, index: number) => !(index === 0 && msg.role === "ai"))
-               .map((msg: any) => ({ role: msg.role === "ai" ? "model" : "user", parts: [{ text: msg.content }] }))
+    // ========================================================================
+    // [FIX 3]: BATASI HISTORY CHAT (ANTI MEMORY/TOKEN MELEDAK)
+    // ========================================================================
+    const MAX_HISTORY = 30; // Cukup 8 pasang tanya jawab terakhir
+    const safeHistory = history && Array.isArray(history)
+      ? history
+          .slice(-MAX_HISTORY) // Potong memori lama
+          .filter((msg: any, index: number) => !(index === 0 && msg.role === "ai"))
+          .map((msg: any) => ({ role: msg.role === "ai" ? "model" : "user", parts: [{ text: msg.content }] }))
       : [];
 
     const chat = model.startChat({ history: safeHistory });
@@ -216,7 +250,7 @@ ${ragContextText}`; // <-- INI RAG NYA DISUNTIKKAN KE SINI BOS!
 }
 
 // ============================================================================
-// FUNGSI BACKGROUND EKSTRAKSI LEAD (TETAP SAMA SEPERTI MILIK BOS)
+// FUNGSI BACKGROUND EKSTRAKSI LEAD (DISEMPURNAKAN)
 // ============================================================================
 async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[]) {
   try {
@@ -232,12 +266,13 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       },
     };
 
+    // [FIX 6]: PAKAI MODEL MURAH (8B) UNTUK TUGAS MUDAH
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash", 
+      model: "gemini-2.5-flash-8b", // Varian 8B jauh lebih murah & cepat untuk tugas parsing JSON 
       generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
     });
 
-    const contextForExtraction = history.slice(-15).map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");
+    const contextForExtraction = history.slice(-10).map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");
     const fullChatLog = contextForExtraction + `\nUser: ${userMessage}\nBot: ${botReply}`;
 
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini. Jika data (seperti nomor telepon atau nama) sudah pernah disebutkan di chat sebelumnya, JANGAN DIHAPUS (wajib ditulis ulang). \n\nChat Historis:\n${fullChatLog}`;
@@ -253,7 +288,7 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
 
       const { data: oldLead } = await supabase
         .from("leads")
-        .select("*")
+        .select("id, full_chat, customer_name, customer_needs, total_people, booking_date, booking_time, is_bot_active")
         .eq("client_id", clientUUID)
         .eq("customer_phone", phoneNumber)
         .maybeSingle();
@@ -272,36 +307,39 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
         }
       }
 
+      // [FIX 4]: BATASI PANJANG MEMORI CHAT SUPABASE (MAKSIMAL 30KB)
+      const MAX_CHAT_LENGTH = 30000; 
+      if (finalChatToSave.length > MAX_CHAT_LENGTH) {
+        finalChatToSave = "...[History Lama Dipangkas]...\n\n" + finalChatToSave.slice(-MAX_CHAT_LENGTH);
+      }
+
       const finalName = (extractedData.name && extractedData.name !== "null") ? extractedData.name : (oldLead?.customer_name || "Web User");
       const finalNeeds = (extractedData.needs && extractedData.needs !== "null") ? extractedData.needs : (oldLead?.customer_needs || userMessage);
       const finalPeople = (extractedData.total_people && extractedData.total_people !== "null") ? extractedData.total_people : (oldLead?.total_people || null);
       const finalDate = (extractedData.booking_date && extractedData.booking_date !== "null") ? extractedData.booking_date : (oldLead?.booking_date || "-");
       const finalTime = (extractedData.booking_time && extractedData.booking_time !== "null") ? extractedData.booking_time : (oldLead?.booking_time || "-");
 
-      const { error: upsertError } = await supabase
-        .from("leads")
-        .upsert({
-          id: oldLead?.id, 
-          client_id: clientUUID,
-          customer_phone: phoneNumber,
-          customer_name: finalName,
-          customer_needs: finalNeeds,
-          total_people: finalPeople,
-          booking_date: finalDate,
-          booking_time: finalTime,
-          full_chat: finalChatToSave, 
-          is_bot_active: oldLead ? oldLead.is_bot_active : true, 
-          platform: 'web'
-        }, {
-          onConflict: 'client_id, customer_phone', 
-          ignoreDuplicates: false 
-        });
+      // [FIX 7]: PISAHKAN INSERT & UPDATE (Mencegah Error ID Undefined)
+      const leadPayload = {
+        client_id: clientUUID,
+        customer_phone: phoneNumber,
+        customer_name: finalName,
+        customer_needs: finalNeeds,
+        total_people: finalPeople,
+        booking_date: finalDate,
+        booking_time: finalTime,
+        full_chat: finalChatToSave, 
+        is_bot_active: oldLead ? oldLead.is_bot_active : true, 
+        platform: 'web'
+      };
 
-      if (upsertError) {
-        console.error("❌ Gagal Smart Upsert Web Lead:", upsertError.message);
+      if (oldLead) {
+         await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
       } else {
-        console.log(`✅ Smart Upsert Web Sukses: ${phoneNumber}`);
+         await supabase.from("leads").insert(leadPayload);
       }
+      
+      console.log(`✅ Smart Upsert Web Sukses: ${phoneNumber}`);
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error:", extractError);
