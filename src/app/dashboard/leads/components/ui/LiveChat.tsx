@@ -39,10 +39,8 @@ export default function LiveChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activePhoneRef = useRef<string | null>(null);
   
-  // [FIX 4]: THROTTLE SCROLL REF (Anti Spam Query DB)
   const scrollThrottleRef = useRef<NodeJS.Timeout | null>(null);
 
-  // [FIX 1]: MENGGUNAKAN USEMEMO AGAR SUPABASE CLIENT STABIL (Anti Memory Leak)
   const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -52,7 +50,6 @@ export default function LiveChat() {
     activePhoneRef.current = activePhone;
   }, [activePhone]);
 
-  // 1. FETCH INISIAL & REALTIME SETUP
   useEffect(() => {
     let channel: any;
 
@@ -60,21 +57,18 @@ export default function LiveChat() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // [FIX 2]: SECURITY GUARD - Ambil Client ID dari tabel, BUKAN dari user_metadata!
       const { data: clientData } = await supabase
         .from('clients')
         .select('id, slug')
         .eq('email', user.email)
         .maybeSingle();
 
-      // Fallback aman jika pakai sistem mapping lain
       const cId = clientData?.id || user.id; 
       const slug = clientData?.slug || "";
 
       setClientId(cId);
       setClientSlug(slug);
 
-      // Ambil Daftar Leads
       const { data: leadsData } = await supabase
         .from('leads')
         .select('*')
@@ -83,9 +77,7 @@ export default function LiveChat() {
         
       if (leadsData) setLeads(leadsData);
 
-      // --- SETUP REALTIME ---
       if (slug) {
-        // [FIX 5]: NAMA CHANNEL UNIK PER USER AGAR TIDAK BENTROK SAAT MULTI-TAB
         const channelName = `livechat_${cId}_${Date.now()}`;
         
         channel = supabase
@@ -122,7 +114,6 @@ export default function LiveChat() {
     };
   }, [supabase]);
 
-  // 2. FETCH CHAT LOGS
   useEffect(() => {
     if (!activePhone || !clientSlug) return;
 
@@ -150,9 +141,7 @@ export default function LiveChat() {
     fetchInitialChats();
   }, [activePhone, clientSlug, supabase]);
 
-  // 3. FUNGSI LOAD MORE DENGAN THROTTLE (ANTI SPAM)
   const handleScroll = async () => {
-    // [FIX 4]: THROTTLE SCROLL AGAR DATABASE TIDAK DI-SPAM REQUEST
     if (scrollThrottleRef.current) return; 
     
     scrollThrottleRef.current = setTimeout(() => {
@@ -218,7 +207,6 @@ export default function LiveChat() {
     e.preventDefault();
     if (!inputText.trim() || !activeLead || !clientSlug) return;
 
-    // [FIX 3]: GUARD KIRIM PESAN SAAT AI AKTIF
     if (activeLead.is_bot_active) {
       alert("⚠️ Harap 'Take Over Chat' (Matikan AI) terlebih dahulu sebelum membalas pesan pelanggan secara manual!");
       return;
@@ -256,6 +244,7 @@ export default function LiveChat() {
   };
 
   return (
+    // [CSS FIX 1]: Tambahkan min-h-0 di Parent Container & overflow-hidden
     <div className="flex h-[80vh] min-h-[600px] bg-slate-950 rounded-[2rem] border border-white/10 overflow-hidden shadow-2xl text-slate-200">
       
       {/* KIRI: Daftar Kontak / Leads */}
@@ -265,8 +254,8 @@ export default function LiveChat() {
           <p className="text-[10px] uppercase tracking-widest text-slate-400 mt-1">Live Monitor</p>
         </div>
         
-        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide relative">
-          {/* [FIX 6]: EMPTY STATE SAAT BELUM ADA LEAD */}
+        {/* [CSS FIX 2]: Tambahkan min-h-0 di List Kontak */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-hide relative">
           {leads.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center opacity-40">
               <svg className="w-12 h-12 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
@@ -299,7 +288,8 @@ export default function LiveChat() {
 
       {/* KANAN: Area Chat */}
       {activeLead ? (
-        <div className="w-2/3 flex flex-col bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed relative">
+        // [CSS FIX 3]: Tambahkan min-h-0 di Area Kanan
+        <div className="w-2/3 flex flex-col min-h-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed relative">
           <div className="absolute inset-0 bg-slate-950/90 pointer-events-none z-0"></div>
           
           <div className="px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur-md flex justify-between items-center z-10">
@@ -323,10 +313,11 @@ export default function LiveChat() {
             </button>
           </div>
 
+          {/* [CSS FIX 4]: Tambahkan min-h-0 di Area Bubble Chat */}
           <div 
             ref={chatContainerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto p-6 space-y-4 z-10 scrollbar-hide"
+            className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 z-10 scrollbar-hide"
           >
             {isLoadingMore && (
               <div className="text-center text-xs text-slate-500 my-2 animate-pulse uppercase tracking-widest font-bold">
@@ -377,7 +368,6 @@ export default function LiveChat() {
                  ⚠️ AI Paused. You are replying manually.
                </div>
             )}
-            {/* Input form disabled jika AI sedang menyala */}
             <form onSubmit={handleSendMessage} className={`flex gap-3 relative transition-all duration-300 ${activeLead.is_bot_active ? 'opacity-50 grayscale' : 'opacity-100'}`}>
               <input
                 type="text"

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -19,10 +19,22 @@ export default function LeadsPage() {
   const [clientData, setClientData] = useState<any>(null);
   const [usageStats, setUsageStats] = useState({ total: 0, limit: 1000, percentage: 0 });
 
-  const supabase = createBrowserClient(
+  // ========================================================================
+  // 🌟 FIX 1 CTO: SUPABASE DIBUNGKUS USEMEMO AGAR STABIL 🌟
+  // ========================================================================
+  const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  ), []);
+
+  // ========================================================================
+  // 🌟 FIX 2 CTO: HANDLE LOGOUT DIBUNGKUS USECALLBACK 🌟
+  // ========================================================================
+  const handleLogout = useCallback(async () => {
+    console.log("⚠️ Sesi habis karena tidak ada aktivitas. Auto-logout berjalan...");
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }, [supabase]);
 
   useEffect(() => {
     async function getClientContext() {
@@ -45,12 +57,12 @@ export default function LeadsPage() {
               setClientSlug(clientInfo.slug);
               setClientData(clientInfo);
 
-              // 2. FIX PERFORMA: Hitung jumlah chat pakai Supabase Count (TIDAK DOWNLOAD ARRAY)
+              // 2. FIX PERFORMA: Hitung jumlah chat pakai Supabase Count
               const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
               
               const { count, error } = await supabase
                 .from("usage_logs")
-                .select("*", { count: "exact", head: true }) // head: true artinya HANYA ambil angka jumlahnya, datanya tidak di-download
+                .select("*", { count: "exact", head: true }) 
                 .eq("client_id", clientId)
                 .gte("created_at", startOfMonth);
 
@@ -72,6 +84,37 @@ export default function LeadsPage() {
     }
     getClientContext();
   }, [supabase]);
+
+  // ========================================================================
+  // 🌟 FIX SECURITY: AUTO LOGOUT JIKA NGANGGUR (GLOBAL & STABIL) 🌟
+  // ========================================================================
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      
+      // Batas waktu nganggur: 2 Jam (2 jam * 60 menit * 60 detik * 1000 milidetik)
+      const IDLE_TIME_LIMIT = 2 * 60 * 60 * 1000; 
+
+      timeoutId = setTimeout(handleLogout, IDLE_TIME_LIMIT);
+    };
+
+    // Daftar pergerakan yang dianggap "User masih aktif"
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    
+    // Pasang sensor ke seluruh dokumen web
+    events.forEach(event => document.addEventListener(event, resetTimer));
+
+    // Nyalakan timer saat komponen di-mount
+    resetTimer();
+
+    // Bersihkan event listener saat komponen di-unmount (Cleanup)
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach(event => document.removeEventListener(event, resetTimer));
+    };
+  }, [handleLogout]); // <--- FIX 3 CTO: Dependency-nya handleLogout yang sudah stabil
 
   // --- FUNGSI DOWNLOAD REPORT KHUSUS KLIEN ---
   const downloadClientReport = () => {
