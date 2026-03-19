@@ -5,7 +5,7 @@ import {
   BrainCircuit, Target, MessageSquareCode, LineChart, 
   Zap, Workflow, Lock, ChevronDown, ArrowRight, 
   Globe, ShieldCheck, CheckCircle2, XCircle, Bot,
-  Instagram, Mail, MessageCircle
+  Instagram, Mail
 } from "lucide-react";
 
 import AOS from "aos";
@@ -37,7 +37,7 @@ export default function HomePage() {
   const faqs = [
     { q: "Apakah saya perlu kemampuan coding?", a: "Sama sekali tidak. Dashboard kami dirancang intuitif. Cukup masukkan informasi bisnis Anda, dan AI akan merangkai logikanya sendiri secara otomatis." },
     { q: "Apakah pelanggan tahu mereka sedang bicara dengan bot?", a: "Sebagian besar tidak akan sadar. Tumbuh AI menggunakan pola bahasa manusia, memahami konteks panjang, dan merespons seperti CS terbaik Anda." },
-    { q: "Apakah AI ini bisa membalas dengan bahasa gaul atau daerah?", a: "Ya. Ditenagai oleh Gemini 2.5 Pro, Tumbuh AI memahami bahasa gaul (slang), singkatan khas Indonesia, hingga konteks keluhan yang rumit." },
+    { q: "Apakah AI ini bisa membalas dengan bahasa gaul atau daerah?", a: "Ya. Ditenagai oleh Model AI Pro, Tumbuh AI memahami bahasa gaul, singkatan khas Indonesia, hingga konteks keluhan yang rumit." },
     { q: "Bagaimana jika pelanggan marah atau minta admin manusia?", a: "Sistem dilengkapi 'Auto-Handoff'. Jika mendeteksi amarah atau permintaan CS manusia, AI otomatis berhenti dan mengoper chat kepada tim Anda." }
   ];
 
@@ -70,7 +70,7 @@ export default function HomePage() {
         </h1>
         
         <p data-aos="fade-up" data-aos-delay="200" className="max-w-3xl mx-auto text-slate-300/80 text-lg md:text-xl font-medium leading-relaxed mb-16 opacity-95">
-          Tumbuh AI mengubah percakapan biasa menjadi mesin pencetak pendapatan. Jawab jutaan pesan masuk secara instan, otomatis kualifikasi leads, dan *closing* 24 jam non-stop tanpa menggaji karyawan tambahan.
+          Tumbuh AI mengubah percakapan biasa menjadi mesin pencetak pendapatan. Jawab jutaan pesan masuk secara instan, otomatis kualifikasi leads, dan <strong>closing</strong> 24 jam non-stop tanpa menggaji karyawan tambahan.
         </p>
 
         <div data-aos="fade-up" data-aos-delay="300" className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-24 w-full">
@@ -92,9 +92,9 @@ export default function HomePage() {
         </div>
       </section>
 
-     {/* =========================================
-         SECTION 2: INDUSTRY FOCUS
-     ========================================= */}
+      {/* =========================================
+          SECTION 2: INDUSTRY FOCUS
+      ========================================= */}
       <section className="relative z-10 border-y border-white/5 bg-[#04060c]/80 backdrop-blur-sm py-10">
         <div data-aos="fade-up" className="max-w-7xl mx-auto px-6">
           <p className="text-center text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-8">
@@ -127,11 +127,11 @@ export default function HomePage() {
                  Satu Otak, Tiga Jalur Utama
                </div>
                <h2 className="text-4xl md:text-5xl font-black text-white italic tracking-tighter mb-6 leading-tight">
-                  Kuasai Platform Tersibuk.<br/>
-                  <span className="text-slate-500">Tanpa Berpindah Aplikasi.</span>
+                 Kuasai Platform Tersibuk.<br/>
+                 <span className="text-slate-500">Tanpa Berpindah Aplikasi.</span>
                </h2>
                <p className="text-slate-400 font-medium max-w-2xl mx-auto text-lg">
-                  Kami bukan sekadar chatbot web. Tumbuh AI adalah spesialis infrastruktur komunikasi yang menyuntikkan kecerdasan buatan langsung ke jantung bisnis Anda.
+                 Kami bukan sekadar chatbot web. Tumbuh AI adalah spesialis infrastruktur komunikasi yang menyuntikkan kecerdasan buatan langsung ke jantung bisnis Anda.
                </p>
             </div>
 
@@ -150,7 +150,7 @@ export default function HomePage() {
                      </div>
                      <h3 className="text-2xl font-black text-white tracking-tight mb-3">WhatsApp Expert</h3>
                      <p className="text-slate-400 font-medium leading-relaxed mb-8 flex-1">
-                        Sulap WhatsApp bisnis Anda menjadi kasir otomatis. Mampu melayani ribuan pesan bersamaan, mencatat jadwal booking, hingga *follow-up* prospek.
+                        Sulap WhatsApp bisnis Anda menjadi kasir otomatis. Mampu melayani ribuan pesan bersamaan, mencatat jadwal booking, hingga <strong>follow-up</strong> prospek.
                      </p>
                      <div className="text-[10px] font-bold text-[#25D366] uppercase tracking-widest border-t border-white/5 pt-6 mt-auto">
                         Official Meta API Integration
@@ -172,7 +172,7 @@ export default function HomePage() {
                      </div>
                      <h3 className="text-2xl font-black text-white tracking-tight mb-3">Instagram DM Engine</h3>
                      <p className="text-slate-400 font-medium leading-relaxed mb-8 flex-1">
-                        Jangan biarkan audiens dari Ads (Iklan) mendingin. AI kami membalas DM & balasan Story instan untuk mengubah *followers* menjadi pembeli.
+                        Jangan biarkan audiens dari Ads (Iklan) mendingin. AI kami membalas DM & balasan Story instan untuk mengubah followers menjadi pembeli.
                      </p>
                      <div className="text-[10px] font-bold text-[#E1306C] uppercase tracking-widest border-t border-white/5 pt-6 mt-auto">
                         Rolling Out Soon
@@ -194,7 +194,7 @@ export default function HomePage() {
                      </div>
                      <h3 className="text-2xl font-black text-white tracking-tight mb-3">Corporate Mail Parser</h3>
                      <p className="text-slate-400 font-medium leading-relaxed mb-8 flex-1">
-                        Sempurna untuk ranah B2B. AI kami membaca email masuk, mengekstrak permintaan tender (RFQ), dan menyusun *draft* penawaran otomatis.
+                        Sempurna untuk ranah B2B. AI kami membaca email masuk, mengekstrak permintaan tender (RFQ), dan menyusun draft penawaran otomatis.
                      </p>
                      <div className="text-[10px] font-bold text-[#EA4335] uppercase tracking-widest border-t border-white/5 pt-6 mt-auto">
                         Google Workspace Sync
@@ -217,7 +217,7 @@ export default function HomePage() {
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">Mengetik Angka 1, 2, 3?</span>
         </h2>
         <p data-aos="fade-up" className="text-slate-300/80 text-lg md:text-xl font-medium leading-relaxed max-w-3xl mx-auto mb-20">
-          Tinggalkan chatbot primitif yang membuat pelanggan kabur. Tumbuh AI merespons dengan empati, bernegosiasi secara dinamis, dan tahu cara melakukan *Hard Selling*.
+          Tinggalkan chatbot primitif yang membuat pelanggan kabur. Tumbuh AI merespons dengan empati, bernegosiasi secara dinamis, dan tahu cara melakukan Hard Selling.
         </p>
 
         <div className="flex flex-col lg:flex-row justify-center gap-8 max-w-5xl mx-auto text-left">
@@ -271,7 +271,7 @@ export default function HomePage() {
                 <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-4 rounded-[1.5rem] rounded-tl-sm text-white w-[92%] shadow-lg leading-relaxed border border-indigo-500">
                   Halo Kak! Untuk HP warna hitam <strong>sisa 2 unit lagi</strong> nih di gudang kita. Jangan sampai kehabisan ya! 🔥<br/><br/>
                   Pengiriman ke Jakarta biasanya cepat kok, cuma 1-2 hari aja pakai kurir reguler.<br/><br/>
-                  Gimana Kak, mau saya *keep* barangnya sekarang? Boleh minta nama penerimanya sekalian? 👇
+                  Gimana Kak, mau saya <strong>keep</strong> barangnya sekarang? Boleh minta nama penerimanya sekalian? 👇
                 </div>
              </div>
           </div>
@@ -280,7 +280,7 @@ export default function HomePage() {
       </section>
 
       {/* =========================================
-          SECTION 5: THE INFRASTRUCTURE (BENTO BOX - RESTORED)
+          SECTION 5: THE INFRASTRUCTURE (BENTO BOX)
       ========================================= */}
       <section className="max-w-7xl mx-auto px-6 py-20 relative z-10 border-t border-white/5">
         <div data-aos="fade-up" className="text-center mb-24 pt-10">
@@ -292,13 +292,13 @@ export default function HomePage() {
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-400">Teknologi Anti-Halusinasi.</span>
           </h2>
           <p className="text-slate-300/80 font-medium max-w-2xl mx-auto text-lg">
-            Kami tidak sekadar memasang prompt pada ChatGPT. Kami membangun *knowledge graph* khusus untuk bisnis Anda agar AI bekerja 100% sesuai fakta.
+            Kami tidak sekadar memasang prompt pada model AI. Kami membangun knowledge graph khusus untuk bisnis Anda agar AI bekerja 100% sesuai fakta.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-[280px]">
           
-          {/* BENTO 1: RAG (SPAN 2) */}
+          {/* BENTO 1: RAG */}
           <div data-aos="fade-up" data-aos-delay="0" className="md:col-span-2 relative group rounded-[2.5rem] bg-[#080b14] border border-white/5 p-10 overflow-hidden transition-all duration-500 hover:border-indigo-500/50 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] hover:shadow-[0_0_40px_-10px_rgba(79,70,229,0.2)]">
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.15)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
             <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-indigo-500/10 rounded-full blur-[80px] group-hover:bg-indigo-500/20 group-hover:translate-x-10 group-hover:-translate-y-10 transition-all duration-700"></div>
@@ -309,16 +309,14 @@ export default function HomePage() {
               <div>
                 <h3 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 italic tracking-tight mb-3">RAG Knowledge Engine</h3>
                 <p className="text-slate-300/80 font-medium leading-relaxed max-w-md">
-                  Menggunakan arsitektur <strong>Retrieval-Augmented Generation</strong>. AI tidak akan pernah "mengarang harga". Ia menarik data langsung dari SOP PDF dan file bisnis yang Anda unggah ke sistem.
+                  Menggunakan arsitektur <strong>Retrieval-Augmented Generation</strong>. AI tidak akan pernah "mengarang harga". Ia menarik data langsung dari SOP PDF dan file bisnis Anda.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* BENTO 2: ZERO TOUCH CAPTURE (SPAN 1) */}
+          {/* BENTO 2: ZERO TOUCH */}
           <div data-aos="fade-up" data-aos-delay="150" className="relative group rounded-[2.5rem] bg-[#080b14] border border-white/5 p-10 overflow-hidden transition-all duration-500 hover:border-cyan-500/50 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] hover:shadow-[0_0_40px_-10px_rgba(34,211,238,0.2)]">
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[200px] bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.15)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
-            <div className="absolute bottom-0 right-0 w-[200px] h-[200px] bg-cyan-500/10 rounded-full blur-[60px] group-hover:bg-cyan-500/20 group-hover:translate-x-5 transition-all duration-700"></div>
             <div className="relative z-10 h-full flex flex-col justify-between">
                <div className="w-12 h-12 rounded-[1rem] bg-gradient-to-br from-cyan-500/20 to-transparent border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-6 group-hover:scale-110 transition-all duration-500">
                  <Target size={24} strokeWidth={1.5} />
@@ -330,24 +328,21 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* BENTO 3: NATIVE API (SPAN 1) */}
+          {/* BENTO 3: NATIVE API */}
           <div data-aos="fade-up" data-aos-delay="0" className="relative group rounded-[2.5rem] bg-[#080b14] border border-white/5 p-10 overflow-hidden transition-all duration-500 hover:border-indigo-500/50 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] hover:shadow-[0_0_40px_-10px_rgba(79,70,229,0.2)]">
-             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[200px] bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.15)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
-             <div className="absolute top-0 left-0 w-[200px] h-[200px] bg-indigo-500/10 rounded-full blur-[60px] group-hover:bg-indigo-500/20 group-hover:-translate-x-5 transition-all duration-700"></div>
              <div className="relative z-10 h-full flex flex-col justify-between">
                <div className="w-12 h-12 rounded-[1rem] bg-gradient-to-br from-indigo-500/20 to-transparent border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-6 group-hover:scale-110 transition-all duration-500">
                  <MessageSquareCode size={24} strokeWidth={1.5} />
                </div>
                <div>
                  <h3 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 italic tracking-tight mb-2">Native Webhook</h3>
-                 <p className="text-[13px] text-slate-300/80 font-medium leading-relaxed">Tanpa aplikasi pihak ketiga. Terhubung langsung secara resmi dengan API WhatsApp.</p>
+                 <p className="text-[13px] text-slate-300/80 font-medium leading-relaxed">Tanpa aplikasi pihak ketiga. Terhubung langsung secara resmi dengan API WhatsApp, Instagram, dan Email.</p>
                </div>
             </div>
           </div>
 
-          {/* BENTO 4: PREDICTIVE INSIGHTS (SPAN 2 DENGAN ANIMASI RADAR) */}
+          {/* BENTO 4: LIVE ANALYTICS */}
           <div data-aos="fade-up" data-aos-delay="150" className="md:col-span-2 relative group rounded-[2.5rem] bg-[#080b14] border border-white/5 p-10 overflow-hidden transition-all duration-500 hover:border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]">
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.05)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
             <div className="relative z-10 h-full flex flex-col md:flex-row items-center justify-between gap-8">
               <div className="flex-1">
                 <div className="w-14 h-14 rounded-[1.2rem] bg-gradient-to-br from-white/10 to-transparent border border-white/20 flex items-center justify-center text-slate-200 mb-6 group-hover:rotate-12 transition-transform duration-500">
@@ -355,21 +350,16 @@ export default function HomePage() {
                 </div>
                 <h3 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 italic tracking-tight mb-3">Live CRM Analytics</h3>
                 <p className="text-slate-300/80 font-medium leading-relaxed">
-                  Semua data prospek (leads) yang didapat AI akan masuk ke Dashboard CRM interaktif. Pantau jumlah chat, penggunaan token, dan konversi secara Real-Time.
+                  Semua data prospek (leads) yang didapat AI akan masuk ke Dashboard CRM interaktif secara Real-Time.
                 </p>
               </div>
-              
-              {/* ANIMASI RADAR KEMBALI! */}
               <div className="hidden md:flex flex-1 items-center justify-center group-hover:scale-105 transition-transform duration-700">
-                <div className="w-full max-w-[200px] aspect-square rounded-full border-[1px] border-dashed border-white/20 flex items-center justify-center relative animate-[spin_30s_linear_infinite]">
+                <div className="w-full max-w-[200px] aspect-square rounded-full border border-dashed border-white/20 flex items-center justify-center relative animate-[spin_30s_linear_infinite]">
                   <div className="w-[70%] h-[70%] rounded-full border border-indigo-500/30 flex items-center justify-center bg-gradient-to-br from-indigo-500/10 to-transparent backdrop-blur-sm">
                      <div className="w-[40%] h-[40%] bg-cyan-400 rounded-full blur-xl animate-pulse"></div>
                   </div>
-                  <div className="absolute top-0 left-1/2 w-3 h-3 bg-white rounded-full shadow-[0_0_15px_#fff] -translate-x-1/2 -translate-y-1/2"></div>
-                  <div className="absolute bottom-0 right-1/4 w-2 h-2 bg-indigo-400 rounded-full shadow-[0_0_10px_#818cf8] -translate-x-1/2"></div>
                 </div>
               </div>
-              
             </div>
           </div>
 
@@ -377,7 +367,27 @@ export default function HomePage() {
       </section>
 
       {/* =========================================
-          SECTION 6: THE AUTONOMOUS PIPELINE
+          SECTION 6: SCALE & METRICS 
+      ========================================= */}
+      <section className="relative z-10 py-32 bg-[#04060c] border-y border-white/5">
+        <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-16 text-center divide-y md:divide-y-0 md:divide-x divide-white/10">
+          <div data-aos="zoom-in" data-aos-delay="0" className="flex flex-col items-center pt-8 md:pt-0">
+             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">&lt; 5s</div>
+             <div className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em]">Response Latency</div>
+          </div>
+          <div data-aos="zoom-in" data-aos-delay="150" className="flex flex-col items-center pt-12 md:pt-0">
+             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">99.9%</div>
+             <div className="text-xs font-black text-cyan-400 uppercase tracking-[0.2em]">Server Uptime</div>
+          </div>
+          <div data-aos="zoom-in" data-aos-delay="300" className="flex flex-col items-center pt-12 md:pt-0">
+             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">24/7</div>
+             <div className="text-xs font-black text-white/70 uppercase tracking-[0.2em]">Sales Autopilot</div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================
+          SECTION 7: THE AUTONOMOUS PIPELINE
       ========================================= */}
       <section className="relative z-10 max-w-7xl mx-auto px-6 py-32 border-t border-white/5">
         <div className="flex flex-col lg:flex-row gap-20 items-start">
@@ -423,26 +433,6 @@ export default function HomePage() {
       </section>
 
       {/* =========================================
-          SECTION 7: SCALE & METRICS
-      ========================================= */}
-      <section className="relative z-10 py-32 bg-[#04060c] border-y border-white/5">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-16 text-center divide-y md:divide-y-0 md:divide-x divide-white/10">
-          <div data-aos="zoom-in" data-aos-delay="0" className="flex flex-col items-center pt-8 md:pt-0">
-             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">&lt; 3s</div>
-             <div className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em]">Response Latency</div>
-          </div>
-          <div data-aos="zoom-in" data-aos-delay="150" className="flex flex-col items-center pt-12 md:pt-0">
-             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">99%</div>
-             <div className="text-xs font-black text-cyan-400 uppercase tracking-[0.2em]">Server Uptime</div>
-          </div>
-          <div data-aos="zoom-in" data-aos-delay="300" className="flex flex-col items-center pt-12 md:pt-0">
-             <div className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 tracking-tighter mb-4">24/7</div>
-             <div className="text-xs font-black text-white/70 uppercase tracking-[0.2em]">Sales Autopilot</div>
-          </div>
-        </div>
-      </section>
-
-      {/* =========================================
           SECTION 8: FAQ 
       ========================================= */}
       <section className="relative z-10 max-w-4xl mx-auto px-6 py-32">
@@ -470,7 +460,7 @@ export default function HomePage() {
       </section>
 
       {/* =========================================
-          SECTION 9: THE FINAL CTA (LENGKAP DGN PRICING LINK)
+          SECTION 9: FINAL CTA
       ========================================= */}
       <section className="relative z-10 max-w-5xl mx-auto px-6 py-32 my-20 text-center">
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/10 to-transparent rounded-[4rem] border border-white/5 backdrop-blur-md -z-10 transform scale-95 md:scale-100 pointer-events-none"></div>
@@ -491,31 +481,11 @@ export default function HomePage() {
               <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
             </button>
           </a>
-          
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest sm:hidden">or</p>
-          
-          {/* LINK PRICING DIKEMBALIKAN */}
           <Link href="/pricing" className="text-sm font-bold text-indigo-400 hover:text-white transition-colors uppercase tracking-widest border-b border-transparent hover:border-white pb-1">
             Lihat Harga Paket
           </Link>
         </div>
       </section>
-
-      {/* =========================================
-          SECTION 10: FOOTER
-      ========================================= */}
-      <footer className="relative z-10 border-t border-white/5 bg-[#020308] py-12 mt-20">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-[0_0_10px_rgba(99,102,241,0.5)]">
-               <Bot size={14} className="text-white" />
-            </div>
-            <span className="text-xl font-black italic tracking-tighter text-white">Tumbuh AI.</span>
-          </div>
-          <p className="text-slate-500 text-sm font-medium">© 2026 Tumbuh Intelligence Core. by Bryan Jacquellino. All rights reserved.</p>
-        </div>
-      </footer>
-
     </div>
   );
 }

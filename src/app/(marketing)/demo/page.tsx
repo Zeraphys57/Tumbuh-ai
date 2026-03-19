@@ -71,7 +71,8 @@ export default function DemoPage() {
             {[
               { title: "Konteks Panjang", desc: "Mampu mengingat obrolan Anda di atas tanpa diulang." },
               { title: "Anti-Halusinasi", desc: "Otomatis menolak menjawab hal di luar bisnis Tumbuh AI." },
-              { title: "Protokol Closing", desc: "Secara halus akan memancing Anda meninggalkan Nama & Nomor WA." }
+              { title: "Protokol Closing", desc: "Secara halus akan memancing Anda meninggalkan Nama & Nomor WA." },
+              { title: "Teknologi Terbaru", desc: "Menggunakan teknologi terbaru sebagai otak utama AI." }
             ].map((item, idx) => (
               <div 
                 key={idx} 
@@ -94,7 +95,7 @@ export default function DemoPage() {
             ))}
           </div>
 
-          {/* TOMBOL CALL TO ACTION */}
+          {/* TOMBOL CALL TO ACTION
           <div data-aos="fade-up" data-aos-delay="600" className="flex flex-col sm:flex-row items-center gap-4">
              <a href={waLink} target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto">
                <button className="group w-full flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-indigo-600 to-cyan-600 text-white rounded-full font-black text-[11px] uppercase tracking-[0.2em] hover:shadow-[0_0_30px_rgba(99,102,241,0.5)] transition-all duration-500 active:scale-95">
@@ -104,7 +105,7 @@ export default function DemoPage() {
              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 sm:mt-0">
                *100% Bebas Kewajiban
              </p>
-          </div>
+          </div> */}
 
         </div>
 
@@ -127,7 +128,7 @@ export default function DemoPage() {
             {/* EFEK NOTIFIKASI PUSH MASUK (INTERAKTIF & AUTO-HIDE) */}
             <div 
               onClick={() => setShowNotification(false)} // HILANG JIKA DIKLIK
-              className={`absolute top-8 left-4 right-4 bg-white/95 backdrop-blur-xl border border-slate-200/50 p-3.5 rounded-[1.2rem] z-50 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)] transition-all duration-700 ease-out transform cursor-pointer hover:-translate-y-2 ${showNotification ? 'translate-y-0 opacity-100' : '-translate-y-20 opacity-0 pointer-events-none'}`}
+              className={`absolute top-8 left-4 right-4 bg-white/95 backdrop-blur-xl border border-slate-200/50 p-3.5 rounded-[1.2rem] z-40 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)] transition-all duration-700 ease-out transform cursor-pointer hover:-translate-y-2 ${showNotification ? 'translate-y-0 opacity-100' : '-translate-y-20 opacity-0 pointer-events-none'}`}
             >
                <div className="flex items-center gap-3">
                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-md">
