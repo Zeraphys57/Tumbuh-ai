@@ -108,6 +108,9 @@ export default function LeadsTable({
   // ========================================================================
   // 🌟 FIX CLAUDE: PARSER CHAT LOG SUPER CERDAS 🌟
   // ========================================================================
+  // ========================================================================
+  // 🌟 FIX: PARSER CHAT LOG SUPER CERDAS (MULTI-BUBBLE SINKRON DENGAN HP) 🌟
+  // ========================================================================
   const renderChatLog = (chatText: string) => {
     if (!chatText) return (
       <div className="p-8 bg-slate-50 rounded-[2rem] border-2 border-slate-100 text-slate-400 italic text-center shadow-inner">
@@ -121,15 +124,15 @@ export default function LeadsTable({
     let currentLines: string[] = [];
     
     const flushCurrent = () => {
-      if (currentRole && currentLines.length > 0) {
-        messages.push({ role: currentRole, text: currentLines.join('\n').trim() });
-        currentLines = [];
+      const text = currentLines.join('\n').trim();
+      if (currentRole && text) {
+        messages.push({ role: currentRole, text });
       }
+      currentLines = [];
     };
     
     for (const line of chatText.split('\n')) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
       
       if (
         trimmed.includes('--- Sesi Obrolan Baru ---') ||
@@ -151,7 +154,18 @@ export default function LeadsTable({
         currentRole = 'bot';
         currentLines.push(trimmed.replace(/^bot:/i, '').trim());
       } else {
-        if (currentRole) currentLines.push(trimmed);
+        // [FIX UTAMA]: Logika Multi-Bubble
+        if (!trimmed) {
+          // Jika baris kosong (Enter ganda) & bot sedang ngomong = Pecah jadi Balon Baru!
+          if (currentRole === 'bot' && currentLines.length > 0) {
+            flushCurrent();
+            currentRole = 'bot'; 
+          } else if (currentRole === 'user') {
+            currentLines.push(""); 
+          }
+        } else {
+          if (currentRole) currentLines.push(trimmed);
+        }
       }
     }
     
@@ -168,9 +182,13 @@ export default function LeadsTable({
         .replace(/\n/g, '<br/>');
         
     return messages.map((msg, i) => {
+      // Jarak antar bubble (kecil jika dari pengirim yang sama, besar jika beda)
+      const isSameAsPrev = i > 0 && messages[i - 1].role === msg.role;
+      const marginTop = isSameAsPrev ? 'mt-1.5' : 'mt-4';
+
       if (msg.role === 'system') {
         return (
-          <div key={i} className="flex justify-center my-4 opacity-70">
+          <div key={i} className={`flex justify-center opacity-70 ${marginTop}`}>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] bg-white px-6 py-2 rounded-full border border-slate-200 shadow-sm">
               {msg.text || 'Sesi Baru'}
             </span>
@@ -180,9 +198,9 @@ export default function LeadsTable({
       
       if (msg.role === 'user') {
         return (
-          <div key={i} className="flex justify-end w-full">
+          <div key={i} className={`flex justify-end w-full ${marginTop}`}>
             <div
-              className="bg-indigo-600 text-white py-3.5 px-6 rounded-3xl rounded-tr-sm max-w-[80%] shadow-md text-[13px] font-medium leading-relaxed"
+              className={`bg-indigo-600 text-white py-3.5 px-6 rounded-3xl shadow-md text-[13px] font-medium leading-relaxed max-w-[80%] ${isSameAsPrev ? 'rounded-tr-xl' : 'rounded-tr-sm'}`}
               dangerouslySetInnerHTML={{ __html: formatHtml(msg.text) }}
             />
           </div>
@@ -190,9 +208,9 @@ export default function LeadsTable({
       }
       
       return (
-        <div key={i} className="flex justify-start w-full">
+        <div key={i} className={`flex justify-start w-full ${marginTop}`}>
           <div
-            className="bg-white text-slate-700 py-3.5 px-6 rounded-3xl rounded-tl-sm max-w-[85%] border border-slate-200 shadow-sm text-[13px] font-medium leading-relaxed"
+            className={`bg-white text-slate-700 py-3.5 px-6 rounded-3xl border border-slate-200 shadow-sm text-[13px] font-medium leading-relaxed max-w-[85%] ${isSameAsPrev ? 'rounded-tl-xl' : 'rounded-tl-sm'}`}
             dangerouslySetInnerHTML={{ __html: formatHtml(msg.text) }}
           />
         </div>
@@ -226,7 +244,7 @@ export default function LeadsTable({
         </div>
       </div>
 
-      <div className="overflow-x-auto min-h-[300px]">
+      <div className="overflow-x-auto min-h-[300px] max-h-[600px] overflow-y-auto">
         <table className="w-full text-left">
           <tbody className="divide-y divide-slate-50 text-sm font-medium">
             {filteredLeads.length === 0 && (
@@ -296,7 +314,7 @@ export default function LeadsTable({
       {/* MODAL POPUP CHAT LOGS */}
       {selectedLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[999] flex items-center justify-center p-4 shadow-2xl">
-          <div className="bg-[#F8FAFC] w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] border-4 border-white">
+          <div className="bg-[#F8FAFC] w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] min-h-0 border-4 border-white">
             
             <div className="p-8 border-b flex justify-between items-center bg-white shadow-sm z-10 relative">
               <div>
@@ -318,7 +336,7 @@ export default function LeadsTable({
             </div>
             
             {/* AREA BUBBLE CHAT */}
-            <div className="p-8 overflow-y-auto max-h-[500px]">
+            <div className="p-8 overflow-y-auto flex-1 min-h-0">
                <div className="flex flex-col gap-4">
                  {renderChatLog(selectedLead.full_chat)}
                </div>

@@ -46,12 +46,11 @@ export async function POST(req: Request) {
     // 1. RATE LIMITING (ANTI SPAM) - [FIX 3]: DIBUAT UNIK PER CLIENT + IP/USER
     // ========================================================================
     const ip = req.headers.get("x-forwarded-for") || "anonymous";
-    // Gunakan gabungan ClientID dan IP agar adil buat semua klien
     const rateLimitKey = `${clientId}_${ip}`; 
     const now = Date.now();
     const lastRequest = rateLimitMap.get(rateLimitKey);
     
-    if (lastRequest && now - lastRequest < 2000) { 
+    if (lastRequest && now - lastRequest < 4000) { 
       return NextResponse.json({ reply: "Ketiknya pelan-pelan saja ya Kak... 🙏" }, { status: 429 });
     }
     rateLimitMap.set(rateLimitKey, now);
@@ -98,7 +97,6 @@ export async function POST(req: Request) {
     // ========================================================================
     let ragContextText = "";
     try {
-      // [FIX 1: KRITIKAL]: MODEL HARUS KONSISTEN DENGAN SAAT UPLOAD!
       const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
       const embedResult = await embeddingModel.embedContent({
         content: { role: "user", parts: [{ text: message }] },
@@ -180,12 +178,14 @@ ${ragContextText}`;
     // ========================================================================
     // [FIX 3]: BATASI HISTORY CHAT (ANTI MEMORY/TOKEN MELEDAK)
     // ========================================================================
-    const MAX_HISTORY = 30; // Cukup 8 pasang tanya jawab terakhir
+    const MAX_HISTORY = 30; 
     const safeHistory = history && Array.isArray(history)
       ? history
-          .slice(-MAX_HISTORY) // Potong memori lama
-          .filter((msg: any, index: number) => !(index === 0 && msg.role === "ai"))
-          .map((msg: any) => ({ role: msg.role === "ai" ? "model" : "user", parts: [{ text: msg.content }] }))
+          .slice(-MAX_HISTORY)
+          .map((msg: any) => ({ 
+             role: (msg.role === "ai" || msg.role === "assistant" || msg.role === "model") ? "model" : "user", 
+             parts: [{ text: msg.content }] 
+          }))
       : [];
 
     const chat = model.startChat({ history: safeHistory });
@@ -250,10 +250,18 @@ ${ragContextText}`;
 }
 
 // ============================================================================
-// FUNGSI BACKGROUND EKSTRAKSI LEAD (DISEMPURNAKAN)
+// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (BOLA SALJU DIHAPUS 🌟)
+// ============================================================================
+// ============================================================================
+// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (ANTI GAGAL JSON & DEBUG READY) 🌟
+// ============================================================================
+// ============================================================================
+// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (ANTI GAGAL JSON & DEBUG READY) 🌟
 // ============================================================================
 async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[]) {
   try {
+    console.log("🔍 Extraction started, history length:", history.length);
+    
     const leadSchema: any = {
       type: SchemaType.OBJECT,
       properties: {
@@ -266,48 +274,54 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       },
     };
 
-    // [FIX 6]: PAKAI MODEL MURAH (8B) UNTUK TUGAS MUDAH
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-8b", // Varian 8B jauh lebih murah & cepat untuk tugas parsing JSON 
+      model: "gemini-2.5-flash-lite", 
       generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
     });
 
-    const contextForExtraction = history.slice(-10).map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");
+    const contextForExtraction = history.map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");    
     const fullChatLog = contextForExtraction + `\nUser: ${userMessage}\nBot: ${botReply}`;
 
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini. Jika data (seperti nomor telepon atau nama) sudah pernah disebutkan di chat sebelumnya, JANGAN DIHAPUS (wajib ditulis ulang). \n\nChat Historis:\n${fullChatLog}`;
-
     const extractionResult = await extractorModel.generateContent(checkPrompt);
-    const extractedData = JSON.parse(extractionResult.response.text());
+    
+    const rawText = extractionResult.response.text().trim();
+    const cleanJson = rawText.replace(/```json|```/g, "").trim();
+    const extractedData = JSON.parse(cleanJson);
+    
+    console.log("🔍 Hasil Ekstraksi AI:", extractedData);
 
     if (extractedData.phone && extractedData.phone !== "null" && extractedData.phone.length > 5) {
+      console.log("📱 Nomor terdeteksi:", extractedData.phone);
       
       let phoneNumber = String(extractedData.phone).replace(/[^0-9]/g, ""); 
       if (phoneNumber.startsWith("0")) phoneNumber = "62" + phoneNumber.substring(1);
       else if (phoneNumber.startsWith("8")) phoneNumber = "62" + phoneNumber;
 
-      const { data: oldLead } = await supabase
+      // [FIX KRITIKAL]: Hapus updated_at dari select agar query TIDAK ERROR!
+      const { data: oldLead, error: selectError } = await supabase
         .from("leads")
         .select("id, full_chat, customer_name, customer_needs, total_people, booking_date, booking_time, is_bot_active")
         .eq("client_id", clientUUID)
         .eq("customer_phone", phoneNumber)
-        .maybeSingle();
+        .order('created_at', { ascending: false }) // Urutkan dari yang paling baru
+        .limit(1) // Ambil 1 aja yang paling pucuk
+        .maybeSingle(); // Dijamin aman sentosa!
 
-      let finalChatToSave = fullChatLog;
-
-      if (oldLead && oldLead.full_chat) {
-        const sessionSignature = fullChatLog.substring(0, 50);
-
-        if (oldLead.full_chat.includes(sessionSignature)) {
-           const spliceIndex = oldLead.full_chat.lastIndexOf(sessionSignature);
-           const preservedOldHistory = oldLead.full_chat.substring(0, spliceIndex); 
-           finalChatToSave = preservedOldHistory + fullChatLog;
-        } else {
-           finalChatToSave = oldLead.full_chat + "\n\n--- Sesi Obrolan Baru ---\n\n" + fullChatLog;
-        }
+      if (selectError) {
+         console.error("❌ DB Select Error:", selectError.message);
       }
 
-      // [FIX 4]: BATASI PANJANG MEMORI CHAT SUPABASE (MAKSIMAL 30KB)
+      const newTurnLog = `User: ${userMessage}\nBot: ${botReply}`;
+      let finalChatToSave;
+
+      if (oldLead?.full_chat) {
+        // Langsung append tanpa cek waktu (Lebih aman dan stabil)
+        finalChatToSave = oldLead.full_chat + "\n\n" + newTurnLog;
+      } else {
+        finalChatToSave = newTurnLog; 
+      }
+
       const MAX_CHAT_LENGTH = 30000; 
       if (finalChatToSave.length > MAX_CHAT_LENGTH) {
         finalChatToSave = "...[History Lama Dipangkas]...\n\n" + finalChatToSave.slice(-MAX_CHAT_LENGTH);
@@ -319,7 +333,6 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       const finalDate = (extractedData.booking_date && extractedData.booking_date !== "null") ? extractedData.booking_date : (oldLead?.booking_date || "-");
       const finalTime = (extractedData.booking_time && extractedData.booking_time !== "null") ? extractedData.booking_time : (oldLead?.booking_time || "-");
 
-      // [FIX 7]: PISAHKAN INSERT & UPDATE (Mencegah Error ID Undefined)
       const leadPayload = {
         client_id: clientUUID,
         customer_phone: phoneNumber,
@@ -333,13 +346,19 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
         platform: 'web'
       };
 
+      // [FIX RADAR]: Pasang deteksi error yang jujur saat Update/Insert
       if (oldLead) {
-         await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
+         const { error: updateErr } = await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
+         if (updateErr) console.error("❌ Update DB Error:", updateErr.message);
+         else console.log(`✅ Update Chat ke DB Sukses: ${phoneNumber}`);
       } else {
-         await supabase.from("leads").insert(leadPayload);
+         const { error: insertErr } = await supabase.from("leads").insert(leadPayload);
+         if (insertErr) console.error("❌ Insert DB Error:", insertErr.message);
+         else console.log(`✅ Insert Lead Baru Sukses: ${phoneNumber}`);
       }
       
-      console.log(`✅ Smart Upsert Web Sukses: ${phoneNumber}`);
+    } else {
+      console.log("⚠️ Nomor HP belum diberikan oleh user. Skiping save to database.");
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error:", extractError);

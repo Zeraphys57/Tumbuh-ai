@@ -336,7 +336,7 @@ async function runLeadExtractionBackground(client: any, senderPhone: string, use
 
     // [FIX 3]: MENGGUNAKAN MODEL 8B YANG MURAH & SUPER CEPAT UNTUK EKSTRAKSI
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-8b", 
+      model: "gemini-2.5-flash-lite", 
       generationConfig: { 
         responseMimeType: "application/json",
         responseSchema: leadSchema

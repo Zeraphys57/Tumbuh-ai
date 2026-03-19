@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   try {
     const { month, needs } = await req.json();
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
     // Prompt yang sangat spesifik dan terarah agar outputnya elegan
     const prompt = `

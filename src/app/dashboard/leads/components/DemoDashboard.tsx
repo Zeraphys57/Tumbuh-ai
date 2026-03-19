@@ -119,7 +119,9 @@ export default function DemoDashboard() {
       .on('postgres_changes', 
         { event: 'UPDATE', schema: 'public', table: 'leads', filter: `client_id=eq.${clientId}` }, 
         (payload) => {
-          setLeads((currentLeads) => currentLeads.map(lead => lead.id === payload.new.id ? payload.new : lead));
+          // [FIX]: Pakai teknik SAFE MERGE ({ ...lead, ...payload.new })
+          // Biar kolom yang nggak dikirim sama Supabase nggak ikut ilang!
+          setLeads((currentLeads) => currentLeads.map(lead => lead.id === payload.new.id ? { ...lead, ...payload.new } : lead));
         }
       )
       .subscribe();
