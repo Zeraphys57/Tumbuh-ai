@@ -512,7 +512,7 @@ export default function HomePage() {
             </div>
             <span className="text-xl font-black italic tracking-tighter text-white">Tumbuh AI.</span>
           </div>
-          <p className="text-slate-500 text-sm font-medium">© 2026 Tumbuh Intelligence Core. All rights reserved.</p>
+          <p className="text-slate-500 text-sm font-medium">© 2026 Tumbuh Intelligence Core. by Bryan Jacquellino. All rights reserved.</p>
         </div>
       </footer>
 
