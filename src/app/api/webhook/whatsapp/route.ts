@@ -348,8 +348,10 @@ async function runGeminiAgent(client: any, userMessage: string, userName: string
     const formattedHistory: any[] = [];
     if (chatHistory && chatHistory.length > 0) {
       chatHistory.reverse().forEach((log) => {
-        if (log.message) formattedHistory.push({ role: "user", parts: [{ text: log.message.slice(0, 1000) }] });
-        if (log.response) formattedHistory.push({ role: "model", parts: [{ text: log.response.slice(0, 1000) }] });
+        if (log.message && log.message.trim() !== "" && log.response && log.response.trim() !== "") {
+          formattedHistory.push({ role: "user", parts: [{ text: log.message.slice(0, 1000) }] });
+          formattedHistory.push({ role: "model", parts: [{ text: log.response.slice(0, 1000) }] });
+        }
       });
     }
 
