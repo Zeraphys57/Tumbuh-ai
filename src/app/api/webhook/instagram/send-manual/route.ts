@@ -103,9 +103,12 @@ export async function POST(request: Request) {
 
     const metaResult = await metaResponse.json();
 
+    // ========================================================================
+    // [FIX PAK CLAUDE]: Cegah Data Leakage Info Internal Meta ke Client
+    // ========================================================================
     if (!metaResponse.ok) {
-      console.error("❌ Meta API Error (IG):", JSON.stringify(metaResult, null, 2));
-      return NextResponse.json({ error: "Gagal mengirim ke IG API", details: metaResult }, { status: 500 });
+      console.error("❌ Meta API Error (IG) details:", JSON.stringify(metaResult, null, 2));
+      return NextResponse.json({ error: "Gagal mengirim pesan ke Instagram" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message_id: metaResult.message_id }, { status: 200 });

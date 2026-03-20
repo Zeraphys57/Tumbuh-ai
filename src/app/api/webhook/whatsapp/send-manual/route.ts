@@ -34,8 +34,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Data tidak lengkap" }, { status: 400 });
     }
     
-    if (text.length > 4096) {
-      return NextResponse.json({ error: "Pesan terlalu panjang (Maksimal 4096 karakter)" }, { status: 400 });
+    // [FIX]: Sinkronisasi dengan Frontend, turunkan limit ke 2000 karakter
+    if (text.length > 2000) {
+      return NextResponse.json({ error: "Pesan terlalu panjang (Maksimal 2000 karakter)" }, { status: 400 });
     }
 
     // ========================================================================
@@ -43,10 +44,9 @@ export async function POST(request: Request) {
     // ========================================================================
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY! // Pastikan Key ini ada di .env ya Bos!
+      process.env.SUPABASE_SERVICE_ROLE_KEY! 
     );
 
-    // [FIX 1]: Ganti select "email" jadi "id", karena tabel kita pakai relasi UUID
     const { data: targetClient, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("id, whatsapp_phone_number_id, whatsapp_access_token")
@@ -58,17 +58,16 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // 4. [FIX 2] NEW OWNERSHIP VALIDATION (Enterprise Grade)
+    // 4. NEW OWNERSHIP VALIDATION (Enterprise Grade)
     // ========================================================================
-    // Intip role user yang sedang login
     const { data: currentUser } = await supabaseAdmin
       .from("clients")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
 
-    const isOwner = targetClient.id === user.id; // Apakah dia pemilik Node ini?
-    const isSuperAdmin = currentUser?.role === "super_admin"; // Atau dia Bos-nya?
+    const isOwner = targetClient.id === user.id; 
+    const isSuperAdmin = currentUser?.role === "super_admin"; 
 
     if (!isOwner && !isSuperAdmin) {
       console.warn(`🚨 [SECURITY BREACH] User ${user.id} mencoba membajak WA klien ${clientSlug}`);
@@ -76,12 +75,10 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // 5. [FIX 3] SMART PHONE FORMATTER (Auto-Convert 0 ke 62)
+    // 5. SMART PHONE FORMATTER (Auto-Convert 0 ke 62)
     // ========================================================================
-    // Buang semua karakter aneh (+, -, spasi)
     let formattedPhone = customerPhone.replace(/\D/g, ""); 
     
-    // Kalau depannya 0, sulap jadi 62 (Kode Indonesia) biar Meta nggak ngamuk
     if (formattedPhone.startsWith("0")) {
       formattedPhone = "62" + formattedPhone.substring(1);
     }
@@ -108,7 +105,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: formattedPhone, // Pakai nomor yang sudah disulap
+        to: formattedPhone, 
         type: "text",
         text: { preview_url: false, body: text },
       }),
@@ -117,8 +114,9 @@ export async function POST(request: Request) {
     const metaResult = await metaResponse.json();
 
     if (!metaResponse.ok) {
+      // [FIX PAK CLAUDE]: Log detail cukup di server, jangan kirim ke browser (Mencegah Data Leakage)
       console.error("❌ Meta API Error:", JSON.stringify(metaResult, null, 2));
-      return NextResponse.json({ error: "Gagal ngirim ke Meta API", details: metaResult }, { status: 500 });
+      return NextResponse.json({ error: "Gagal mengirim pesan ke WhatsApp" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message_id: metaResult.messages[0].id }, { status: 200 });

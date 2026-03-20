@@ -40,20 +40,20 @@ export async function POST(request: Request) {
     const entry = body.entry?.[0];
     const messaging = entry?.messaging?.[0];
 
-    // Jika ada pesan masuk dan bukan dari bot sendiri (is_echo)
     if (messaging && messaging.message && !messaging.message.is_echo) {
-      const igAccountId = entry.id; // ID Akun IG Klinik
-      const customerIgId = messaging.sender.id; // ID IG Pasien
+      const igAccountId = entry.id; 
+      const customerIgId = messaging.sender.id; 
       const messageText = messaging.message.text;
 
       console.log(`📩 Pesan IG masuk dari ${customerIgId}: ${messageText}`);
 
       // --------------------------------------------------------------------
-      // 1. CARI KLIEN DI DATABASE (Ambil juga 'features' untuk RAG)
+      // 1. CARI KLIEN DI DATABASE
       // --------------------------------------------------------------------
+      // [FIX 1]: Tarik juga is_active dan monthly_limit untuk Gembok Bisnis
       const { data: client } = await supabase
         .from("clients")
-        .select("id, slug, business_name, instagram_access_token, system_prompt, features")
+        .select("id, slug, business_name, instagram_access_token, system_prompt, features, is_active, monthly_limit")
         .eq("instagram_account_id", igAccountId)
         .single();
 
@@ -62,19 +62,39 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true }, { status: 200 });
       }
 
+      // ====================================================================
+      // [FIX 2 DARI PAK CLAUDE]: GEMBOK BISNIS (Kill Switch & Rate Limit)
+      // ====================================================================
+      if (client.is_active === false) {
+        console.warn(`🛑 Klien ${client.slug} sedang di-suspend/nonaktif.`);
+        return NextResponse.json({ status: "suspended" }, { status: 200 });
+      }
+
+      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const { count } = await supabase
+        .from("usage_logs")
+        .select('*', { count: 'exact', head: true })
+        .eq("client_id", client.id)
+        .gte("created_at", startOfMonth);
+
+      if (count !== null && client.monthly_limit && count >= client.monthly_limit) {
+        console.warn(`⚠️ Klien ${client.slug} sudah mencapai limit bulanan (${client.monthly_limit}).`);
+        return NextResponse.json({ status: "over_limit" }, { status: 200 });
+      }
+
       // --------------------------------------------------------------------
       // 2. CEK SAKLAR AI & DATA LEAD
       // --------------------------------------------------------------------
+      // [FIX 3]: Tarik 'full_chat' untuk keperluan Append di Extractor nanti
       let { data: lead } = await supabase
         .from("leads")
-        .select("id, is_bot_active, created_at")
+        .select("id, is_bot_active, created_at, full_chat") 
         .eq("client_id", client.id)
-        .eq("customer_phone", customerIgId) // Menggunakan ID IG sebagai identifier
+        .eq("customer_phone", customerIgId) 
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      // JIKA ADMIN SEDANG TAKEOVER (SAKLAR OFF)
       if (lead && lead.is_bot_active === false) {
         console.log(`⏸️ AI Paused: Pesan IG dari ${customerIgId} diabaikan bot.`);
         await supabase.from("chat_logs").insert({
@@ -97,7 +117,6 @@ export async function POST(request: Request) {
       // --- LAPIS 3: TRIGGER HUMAN HANDOFF ---
       let finalResponseText = aiResult.text;
       if (finalResponseText.includes("[OPER_MANUSIA]")) {
-         // Matikan bot untuk lead ini
          if (lead) await supabase.from("leads").update({ is_bot_active: false }).eq("id", lead.id);
          
          finalResponseText = "Mohon maaf atas ketidaknyamanannya 🙏. Keluhan/pertanyaan ini akan segera dibantu langsung oleh admin kami via DM ya. Mohon ditunggu.";
@@ -148,7 +167,6 @@ export async function POST(request: Request) {
 // ============================================================================
 async function runGeminiAgentIG(client: any, userMessage: string, customerIgId: string) {
   try {
-    // 1. Ambil Data Addon (RAG)
     let addonText = "";
     let featuresObj: any = {};
     try {
@@ -165,7 +183,6 @@ async function runGeminiAgentIG(client: any, userMessage: string, customerIgId: 
       }
     }
 
-    // 2. Siapkan Master Prompt
     const masterBasePrompt = `Kamu adalah Customer Success & Sales Representative profesional dari bisnis: ${client.business_name}.
 
 === ATURAN BESI (HUKUM MUTLAK, DILARANG KERAS DILANGGAR) ===
@@ -193,21 +210,22 @@ ${addonText}`;
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", systemInstruction: masterBasePrompt });
 
-    // 3. Ambil History Chat (Memori IG)
     const { data: chatHistory } = await supabase
       .from("chat_logs")
       .select("message, response")
       .eq("client_id", client.slug)
       .eq("customer_phone", customerIgId)
-      .eq("platform", "instagram") // Pastikan hanya narik history IG
+      .eq("platform", "instagram") 
       .order("created_at", { ascending: false })
-      .limit(6);
+      .limit(15);
 
     const formattedHistory: any[] = [];
     if (chatHistory && chatHistory.length > 0) {
       chatHistory.reverse().forEach((log) => {
-        if (log.message) formattedHistory.push({ role: "user", parts: [{ text: log.message }] });
-        if (log.response) formattedHistory.push({ role: "model", parts: [{ text: log.response }] });
+        if (log.message && log.message.trim() !== "" && log.response && log.response.trim() !== "") {
+          formattedHistory.push({ role: "user", parts: [{ text: log.message }] });
+          formattedHistory.push({ role: "model", parts: [{ text: log.response }] });
+        }
       });
     }
 
@@ -235,7 +253,7 @@ ${addonText}`;
 async function runLeadExtractionBackgroundIG(client: any, existingLead: any, customerIgId: string, userMsg: string, aiReply: string, history: any[]) {
   try {
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash", 
+      model: "gemini-2.5-flash-lite", 
       generationConfig: { responseMimeType: "application/json" } 
     });
 
@@ -262,25 +280,23 @@ ATURAN PENTING:
     const cleanJson = extractionResult.response.text().replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
 
-    let shouldUpdate = false;
-    if (existingLead) {
-      const leadAgeHours = (Date.now() - new Date(existingLead.created_at).getTime()) / (1000 * 60 * 60);
-      if (leadAgeHours < 24) shouldUpdate = true; 
-    }
-
-    // [FIX: JINAKKAN BOM WAKTU DUPLIKASI LEAD]
-    // Kumpulkan info WA ke dalam kolom customer_needs, 
-    // AGAR customer_phone TETAP MENGGUNAKAN IG ID (Untuk keperluan Webhook Tracking)
     let finalNeeds = extractedData.needs && extractedData.needs !== "null" ? extractedData.needs : "";
     if (extractedData.phone && extractedData.phone !== "null") {
        finalNeeds = `[WA Diberikan: ${extractedData.phone}] ` + finalNeeds;
     }
 
-    if (shouldUpdate) {
-      const updatePayload: any = { full_chat: currentChatLog };
+    // ====================================================================
+    // [FIX 4 DARI PAK CLAUDE]: APPEND FULL CHAT (Bukan Overwrite)
+    // ====================================================================
+    const newTurnLog = `User: ${userMsg}\nBot: ${aiReply}`;
+    const finalChatToSave = existingLead?.full_chat 
+       ? existingLead.full_chat + "\n\n" + newTurnLog 
+       : newTurnLog;
+
+    if (existingLead) {
+      const updatePayload: any = { full_chat: finalChatToSave };
       if (extractedData.name && extractedData.name !== "null") updatePayload.customer_name = extractedData.name;
       
-      // HANYA UPDATE KEBUTUHAN, JANGAN SENTUH CUSTOMER_PHONE
       if (finalNeeds) updatePayload.customer_needs = finalNeeds;
       if (extractedData.total_people && extractedData.total_people !== "null") updatePayload.total_people = extractedData.total_people;
       if (extractedData.booking_date && extractedData.booking_date !== "null") updatePayload.booking_date = extractedData.booking_date;
@@ -292,13 +308,13 @@ ATURAN PENTING:
       await supabase.from("leads").insert({
         client_id: client.id,
         customer_name: extractedData.name && extractedData.name !== "null" ? extractedData.name : "IG User " + customerIgId.substring(0, 5),
-        customer_phone: customerIgId, // TETAP IG ID SEBAGAI IDENTIFIER UTAMA!
+        customer_phone: customerIgId, 
         customer_needs: finalNeeds || userMsg,
         total_people: extractedData.total_people && extractedData.total_people !== "null" ? extractedData.total_people : null,
         booking_date: extractedData.booking_date && extractedData.booking_date !== "null" ? extractedData.booking_date : "-", 
         booking_time: extractedData.booking_time && extractedData.booking_time !== "null" ? extractedData.booking_time : "-",
         platform: "instagram",
-        full_chat: currentChatLog,
+        full_chat: finalChatToSave, // Gunakan string append yang sama
         is_bot_active: true
       });
       console.log("✨ Background IG: Lead Baru Ditambahkan!");

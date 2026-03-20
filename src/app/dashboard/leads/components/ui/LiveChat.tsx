@@ -97,7 +97,10 @@ export default function LiveChat() {
             (payload) => {
               // 1. Kalau ini chat yang lagi dibuka, tambahkan ke bubble
               if (payload.new.customer_phone === activePhoneRef.current) {
-                setChatLogs((prev) => [...prev, payload.new]);
+                setChatLogs((prev) => {
+                  if (prev.some(msg => msg.id === payload.new.id)) return prev;
+                  return [...prev, payload.new];
+                });
                 scrollToBottom(); // [FIX 1]: Ganti scrollIntoView dengan Smart Scroll
               }
               
@@ -225,7 +228,7 @@ export default function LiveChat() {
     await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+ const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !activeLead || !clientSlug) return;
 
@@ -234,10 +237,35 @@ export default function LiveChat() {
       return;
     }
 
+    // ==========================================================
+    // [FIX]: Guard Limit Karakter Diturunkan ke 2000 (UX Lebih Baik)
+    // ==========================================================
+    if (inputText.trim().length > 2000) {
+      alert("⚠️ Pesan terlalu panjang! Maksimal 2000 karakter per pesan agar nyaman dibaca oleh pelanggan.");
+      return;
+    }
+
     const sentText = inputText;
     setInputText(""); 
 
-    // [FIX 3]: AUTO-BUMP untuk pesan yang kita kirim sendiri
+    // 1. BUAT PESAN SEMENTARA (OPTIMISTIC UI)
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      client_id: clientSlug,
+      customer_phone: activePhone,
+      message: "",
+      response: sentText,
+      replied_by: "admin",
+      platform: activeLead.platform || 'whatsapp',
+      created_at: new Date().toISOString()
+    };
+
+    // 2. MUNCULKAN INSTAN
+    setChatLogs(prev => [...prev, optimisticMessage]);
+    scrollToBottom();
+
+    // 3. AUTO-BUMP
     setLeads((prev) => {
       const targetIndex = prev.findIndex(l => l.customer_phone === activePhone);
       if (targetIndex > 0) {
@@ -248,22 +276,33 @@ export default function LiveChat() {
       return prev;
     });
 
-    const { error: dbError } = await supabase.from('chat_logs').insert({
+    // 4. SIMPAN DATABASE BACKGROUND
+    const { data: dbData, error: dbError } = await supabase.from('chat_logs').insert({
         client_id: clientSlug,
         customer_phone: activePhone,
         message: "",
         response: sentText,
         replied_by: "admin",
         platform: activeLead.platform || 'whatsapp'
-    });
+    }).select().single();
 
+    // ==========================================================
+    // [FIX DARI PAK CLAUDE]: Rollback Optimistic UI jika DB Gagal
+    // ==========================================================
     if (dbError) {
       console.error("❌ Gagal simpan chat ke DB:", dbError);
-      return;
+      
+      // Tarik mundur (hapus) pesan dari layar
+      setChatLogs(prev => prev.filter(msg => msg.id !== tempId));
+      alert("❌ Gagal mengirim pesan ke sistem. Silakan coba lagi.");
+      
+      return; // 🛑 HENTIKAN PROSES! Jangan dikirim ke Meta kalau DB aja gagal
+    } else if (dbData) {
+      // Timpa ID sementara dengan ID asli dari Supabase
+      setChatLogs(prev => prev.map(msg => msg.id === tempId ? dbData : msg));
     }
 
-    scrollToBottom();
-
+    // 5. KIRIM KE META
     try {
       const apiUrl = activeLead.platform === 'instagram' ? '/api/webhook/instagram/send-manual' : '/api/webhook/whatsapp/send-manual';
       await fetch(apiUrl, {

@@ -343,7 +343,7 @@ async function runGeminiAgent(client: any, userMessage: string, userName: string
       .eq("client_id", client.slug)
       .eq("customer_phone", senderPhone)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(15);
 
     const formattedHistory: any[] = [];
     if (chatHistory && chatHistory.length > 0) {
