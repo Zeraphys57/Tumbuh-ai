@@ -265,7 +265,7 @@ export default function LiveChat() {
     scrollToBottom();
 
     try {
-      const apiUrl = activeLead.platform === 'instagram' ? '/api/instagram/send-manual' : '/api/whatsapp/send-manual';
+      const apiUrl = activeLead.platform === 'instagram' ? '/api/webhook/instagram/send-manual' : '/api/webhook/whatsapp/send-manual';
       await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
