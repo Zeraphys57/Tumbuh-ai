@@ -21,17 +21,33 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    // 1. Eksekusi Login
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    if (error) {
+    if (authError) {
       setError("Email atau password salah. Silakan cek kembali.");
       setLoading(false);
-    } else {
-      // Redirect ke dashboard leads jika sukses
-      router.push("/dashboard/leads");
+      return;
+    }
+
+    // 2. Jika sukses, cek Role di database
+    const user = authData.user;
+    if (user) {
+      const { data: clientData } = await supabase
+        .from("clients")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      // 3. Smart Redirect Berdasarkan Role
+      if (clientData && clientData.role === "super_admin") {
+        router.push("/dashboard/admin"); // 👑 Lempar ke Enterprise Cockpit
+      } else {
+        router.push("/dashboard/leads"); // 🏢 Lempar ke Dashboard Klien
+      }
     }
   };
 

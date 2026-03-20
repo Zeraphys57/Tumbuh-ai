@@ -19,9 +19,14 @@ const AVAILABLE_TOOLS = [
   { id: "panggil_admin", name: "Panggil Admin (WA)", category: "Eskalasi Darurat" },
 ];
 
-const IDR_RATE_PER_TOKEN = parseFloat(process.env.NEXT_PUBLIC_IDR_RATE_PER_TOKEN || "0.015"); 
-const BANK_NAME = process.env.NEXT_PUBLIC_BANK_NAME || "Bank BCA";
-const BANK_ACCOUNT = process.env.NEXT_PUBLIC_BANK_ACCOUNT || "123-456-7890 a/n Bryan Jacquellino";
+// [SECURITY PATCH 2]: Hapus NEXT_PUBLIC_ dari variabel env. 
+// Jika ini dieksekusi di Client-Side, lebih aman di-hardcode langsung 
+// atau ditaruh di dalam function saat cetak PDF saja agar tidak bocor di global window.
+const INVOICE_CONFIG = {
+  IDR_RATE: 0.015,
+  BANK_NAME: "Bank BCA", 
+  BANK_ACCOUNT: "123-456-7890 a/n Bryan Jacquellino"
+};
 
 export default function SuperAdminDashboard() {
   
@@ -152,7 +157,6 @@ export default function SuperAdminDashboard() {
     });
   };
 
-  // [FIX] Mengembalikan fungsi openToolModal yang sempat terpotong!
   const openToolModal = (client: any) => {
     setSelectedClientForTools({ 
       id: client.id, 
@@ -257,6 +261,24 @@ export default function SuperAdminDashboard() {
          window.location.href = "/login";
          return;
       }
+      
+      // ====================================================================
+      // [SECURITY PATCH 1]: VERIFIKASI ROLE SUPER ADMIN (OPSI 2 - SCALABLE)
+      // ====================================================================
+      const { data: adminCheck } = await supabase
+        .from("clients")
+        .select("role")
+        .eq("id", user.id) // <--- Cek berdasarkan UUID Auth Bos
+        .maybeSingle();
+
+      // Jika role bukan 'super_admin' (atau datanya tidak ada), DITENDANG KELUAR!
+      if (!adminCheck || adminCheck.role !== "super_admin") {
+        console.warn("🛡️ SECURITY ALERT: Akses Ilegal Ditolak!");
+        window.location.href = "/dashboard/leads"; 
+        return;
+      }
+      // ====================================================================
+
       setAdminEmail(user.email || "Unknown Admin");
 
       const [year, month] = selectedMonth.split('-');
@@ -279,7 +301,7 @@ export default function SuperAdminDashboard() {
           const clientActiveTools = toolsData?.filter(t => t.client_id === client.id).map(t => t.tool_name) || [];
 
           const avgTokensPerChat = totalChat > 0 ? totalTokens / totalChat : 0;
-          const actualCostPerChat = avgTokensPerChat * IDR_RATE_PER_TOKEN;
+          const actualCostPerChat = avgTokensPerChat * INVOICE_CONFIG.IDR_RATE;
           const calculatedOverlimitPrice = Math.ceil((actualCostPerChat * 5) / 100) * 100;
           const finalOverlimitPrice = Math.max(500, calculatedOverlimitPrice);
 
@@ -311,7 +333,7 @@ export default function SuperAdminDashboard() {
 
   const grandTotalTokens = allStats.reduce((acc, curr) => acc + curr.totalTokens, 0);
   const grandTotalChats = allStats.reduce((acc, curr) => acc + curr.totalChat, 0);
-  const totalCostIDR = grandTotalTokens * IDR_RATE_PER_TOKEN;
+  const totalCostIDR = grandTotalTokens * INVOICE_CONFIG.IDR_RATE;
 
   const activeClients = allStats.filter(c => c.isActive);
   const baseSubscriptionRevenue = activeClients.reduce((acc, curr) => acc + (planPrices[curr.plan] || planPrices["Basic"]), 0);
@@ -405,7 +427,9 @@ export default function SuperAdminDashboard() {
     doc.setTextColor(50);
     doc.text("Silakan transfer ke rekening berikut sebelum tanggal 5:", 14, finalY + 15);
     doc.setFont("helvetica", "normal");
-    doc.text(`${BANK_NAME}: ${BANK_ACCOUNT}`, 14, finalY + 20);
+    
+    // [SECURITY PATCH 2: PANGGIL VARIABEL STATIS]
+    doc.text(`${INVOICE_CONFIG.BANK_NAME}: ${INVOICE_CONFIG.BANK_ACCOUNT}`, 14, finalY + 20);
     
     logAdminAction("DOWNLOAD_INVOICE", client.name, `Mencetak Invoice Tagihan untuk bulan ${currentMonthName}`);
     doc.save(`Invoice_${client.name}_${currentMonthName}.pdf`);
@@ -422,7 +446,7 @@ export default function SuperAdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] p-8 font-sans pb-20 relative">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-[#0a0f1c] to-slate-900 p-4 md:p-8 font-sans pb-20 relative overflow-hidden text-slate-200">
       
       {/* 1. CONFIRM MODAL */}
       {confirmModal && (
@@ -464,20 +488,20 @@ export default function SuperAdminDashboard() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
             
-            <div className="bg-slate-900 p-8 flex justify-between items-center shrink-0">
+            <div className="bg-slate-900 p-6 md:p-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 relative">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center gap-3">
+                <h2 className="text-xl md:text-2xl font-black text-white flex items-center gap-3">
                   🤖 Agentic Tools Manager
                 </h2>
-                <p className="text-slate-400 mt-1 font-medium">Klien: <span className="text-blue-400 font-bold">{selectedClientForTools.name}</span></p>
+                <p className="text-slate-400 mt-1 font-medium text-sm md:text-base">Klien: <span className="text-blue-400 font-bold">{selectedClientForTools.name}</span></p>
               </div>
-              <button onClick={() => setIsToolModalOpen(false)} className="w-10 h-10 bg-slate-800 text-slate-400 rounded-full flex items-center justify-center hover:bg-red-500 hover:text-white transition-all">
+              <button onClick={() => setIsToolModalOpen(false)} className="absolute top-6 right-6 sm:relative sm:top-auto sm:right-auto w-10 h-10 bg-slate-800 text-slate-400 rounded-full flex items-center justify-center hover:bg-red-500 hover:text-white transition-all">
                 ✕
               </button>
             </div>
 
-            <div className="p-8 overflow-y-auto flex-1 bg-slate-50">
-              <p className="text-sm font-bold mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-xl">
+            <div className="p-6 md:p-8 overflow-y-auto flex-1 bg-slate-50">
+              <p className="text-xs md:text-sm font-bold mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-xl">
                 💡 <span className="font-black">Dynamic Loading:</span> AI klien ini hanya akan disuntikkan tool yang berstatus ON. Perubahan otomatis tersimpan ke Database.
               </p>
 
@@ -488,11 +512,11 @@ export default function SuperAdminDashboard() {
                     <div key={tool.id} className={`flex items-center justify-between p-5 rounded-2xl border-2 transition-all ${isActive ? 'bg-white border-blue-500 shadow-md' : 'bg-white border-slate-200 opacity-60 hover:opacity-100'}`}>
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{tool.category}</span>
-                        <h4 className="font-black text-slate-800 text-lg mt-1">{tool.name}</h4>
-                        <code className="text-xs text-slate-400 mt-1 block">{tool.id}</code>
+                        <h4 className="font-black text-slate-800 text-base md:text-lg mt-1">{tool.name}</h4>
+                        <code className="text-[10px] md:text-xs text-slate-400 mt-1 block">{tool.id}</code>
                       </div>
                       
-                      <button onClick={() => toggleAgenticTool(tool.id)} className={`relative w-14 h-8 rounded-full transition-colors duration-300 focus:outline-none ${isActive ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                      <button onClick={() => toggleAgenticTool(tool.id)} className={`relative w-14 h-8 rounded-full transition-colors duration-300 focus:outline-none shrink-0 ${isActive ? 'bg-blue-500' : 'bg-slate-300'}`}>
                         <span className={`absolute left-1 top-1 w-6 h-6 bg-white rounded-full transition-transform duration-300 shadow-sm ${isActive ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                     </div>
@@ -501,8 +525,8 @@ export default function SuperAdminDashboard() {
               </div>
             </div>
             
-            <div className="bg-white border-t border-slate-200 p-6 flex justify-end shrink-0">
-              <button onClick={() => setIsToolModalOpen(false)} className="bg-slate-900 text-white font-bold px-8 py-3 rounded-xl hover:bg-slate-800 transition-all">
+            <div className="bg-white border-t border-slate-200 p-4 md:p-6 flex justify-end shrink-0">
+              <button onClick={() => setIsToolModalOpen(false)} className="w-full sm:w-auto bg-slate-900 text-white font-bold px-8 py-3 rounded-xl hover:bg-slate-800 transition-all">
                 Selesai & Tutup
               </button>
             </div>
@@ -513,27 +537,27 @@ export default function SuperAdminDashboard() {
       {/* NUCLEAR DELETE MODAL */}
       {isModalOpen && clientToDelete && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-[0_0_100px_rgba(220,38,38,0.5)] border-[6px] border-red-600 overflow-hidden animate-in zoom-in slide-in-from-bottom-10 duration-500">
-            <div className="bg-red-600 p-10 text-white text-center">
-              <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          <div className="bg-white w-full max-w-md rounded-[2rem] md:rounded-[3rem] shadow-[0_0_100px_rgba(220,38,38,0.5)] border-[4px] md:border-[6px] border-red-600 overflow-hidden animate-in zoom-in slide-in-from-bottom-10 duration-500">
+            <div className="bg-red-600 p-8 md:p-10 text-white text-center">
+              <div className="w-20 h-20 md:w-24 md:h-24 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                <svg className="w-10 h-10 md:w-12 md:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
               </div>
-              <h2 className="text-3xl font-black uppercase italic tracking-tighter leading-none">Konfirmasi Pemusnahan</h2>
-              <p className="text-red-100 text-xs mt-3 font-bold uppercase tracking-widest opacity-80">Data tidak akan bisa dipulihkan kembali!</p>
+              <h2 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter leading-none">Konfirmasi Pemusnahan</h2>
+              <p className="text-red-100 text-[10px] md:text-xs mt-3 font-bold uppercase tracking-widest opacity-80">Data tidak akan bisa dipulihkan kembali!</p>
             </div>
-            <div className="p-10">
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">Tulis mantra ini untuk menghapus <span className="text-slate-900 underline">{clientToDelete.name}</span>:</p>
-              <div className="bg-red-50 p-5 rounded-2xl border-2 border-dashed border-red-200 mb-8 text-center select-none">
-                <span className="text-red-600 font-black text-lg italic tracking-tight">MUSNAHKAN {clientToDelete.name}</span>
+            <div className="p-6 md:p-10">
+              <p className="text-[10px] md:text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">Tulis mantra ini untuk menghapus <span className="text-slate-900 underline">{clientToDelete.name}</span>:</p>
+              <div className="bg-red-50 p-4 rounded-xl md:rounded-2xl border-2 border-dashed border-red-200 mb-6 text-center select-none">
+                <span className="text-red-600 font-black text-base md:text-lg italic tracking-tight">MUSNAHKAN {clientToDelete.name}</span>
               </div>
               <input 
-                type="text" placeholder="Ketik di sini dengan penuh kesadaran..." value={challengeInput} onChange={(e) => setChallengeInput(e.target.value)}
-                className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl py-5 px-6 font-black text-center text-slate-800 outline-none focus:border-red-600 focus:ring-8 focus:ring-red-600/10 transition-all mb-8 placeholder:text-slate-300"
+                type="text" placeholder="Ketik di sini..." value={challengeInput} onChange={(e) => setChallengeInput(e.target.value)}
+                className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl py-4 px-4 font-black text-center text-slate-800 outline-none focus:border-red-600 focus:ring-4 focus:ring-red-600/10 transition-all mb-6 placeholder:text-slate-300"
               />
-              <div className="flex gap-4">
-                <button onClick={() => setIsModalOpen(false)} className="flex-1 bg-slate-100 text-slate-500 py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all active:scale-95">Batal</button>
-                <button onClick={executeDelete} disabled={challengeInput !== `MUSNAHKAN ${clientToDelete.name}` || isDeleting} className="flex-[1.5] bg-red-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl shadow-red-300 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-2 active:scale-95">
-                  {isDeleting ? "Menghancurkan..." : "🔥 Eksekusi Permanen"}
+              <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
+                <button onClick={() => setIsModalOpen(false)} className="w-full sm:flex-1 bg-slate-100 text-slate-500 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all active:scale-95">Batal</button>
+                <button onClick={executeDelete} disabled={challengeInput !== `MUSNAHKAN ${clientToDelete.name}` || isDeleting} className="w-full sm:flex-[1.5] bg-red-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-300 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-2 active:scale-95">
+                  {isDeleting ? "Mengahancurkan..." : "🔥 Eksekusi"}
                 </button>
               </div>
             </div>
@@ -542,67 +566,69 @@ export default function SuperAdminDashboard() {
       )}
 
       <div className="max-w-[95rem] mx-auto">
-        <header className="mb-10 flex justify-between items-end">
+        <header className="mb-8 md:mb-10 flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6">
           <div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic">Tumbuh <span className="text-blue-600">Master</span></h1>
-            <p className="text-slate-500 font-medium tracking-tight">Enterprise Cockpit: Babarsari • Yogyakarta</p>
+            <h1 className="text-3xl md:text-4xl font-black text-blue-500 tracking-tighter italic drop-shadow-lg">
+              Tumbuh <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-600 filter drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]">Master</span>
+            </h1>
+            <p className="text-slate-500 text-xs md:text-base font-medium tracking-tight mt-1">Tumbuh Intelligence Core Engine</p>
           </div>
           
-          <div className="flex gap-3 items-center">
-             <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-2xl shadow-sm border border-slate-200">
-               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Periode:</span>
-               <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm font-black text-blue-600 outline-none cursor-pointer bg-transparent" />
+          <div className="flex flex-wrap gap-3 items-center w-full lg:w-auto">
+             <div className="flex flex-1 sm:flex-none items-center gap-2 bg-white px-3 py-2.5 md:px-4 md:py-3 rounded-xl shadow-sm border border-slate-200">
+               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:inline">Periode:</span>
+               <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-xs md:text-sm font-black text-blue-600 outline-none cursor-pointer bg-transparent w-full sm:w-auto" />
              </div>
-             <button onClick={handleLogout} className="bg-white border border-slate-200 text-red-500 px-6 py-3.5 rounded-2xl font-black hover:bg-red-50 transition-all text-[10px] uppercase tracking-wider">Logout</button>
-             <button onClick={generatePDF} className="bg-blue-600 text-white px-6 py-3.5 rounded-2xl font-bold shadow-lg hover:bg-blue-700 transition-all text-sm">Unduh PDF {currentMonthName}</button>
-             <Link href="/register" className="bg-slate-900 text-white px-6 py-3.5 rounded-2xl font-bold shadow-lg hover:bg-slate-800 transition-all text-sm flex items-center gap-2">
+             <button onClick={handleLogout} className="bg-white border border-slate-200 text-red-500 px-4 md:px-6 py-2.5 md:py-3.5 rounded-xl font-black hover:bg-red-50 transition-all text-[10px] uppercase tracking-wider shrink-0">Logout</button>
+             <button onClick={generatePDF} className="flex-1 sm:flex-none bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3.5 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all text-xs md:text-sm text-center">Unduh PDF</button>
+             <Link href="/register" className="w-full sm:w-auto justify-center bg-slate-900 text-white px-4 md:px-6 py-2.5 md:py-3.5 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all text-xs md:text-sm flex items-center gap-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg> Deploy Node
              </Link>
           </div>
         </header>
 
         {/* FINANCIAL DASHBOARD */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-white">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
+            <div className="bg-white p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] shadow-xl border border-white">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
                   <span className="flex items-center gap-2"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg> Global Chats</span>
                   <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px]">{currentMonthName}</span>
                 </p>
-                <h2 className="text-4xl font-black mt-2 text-slate-900 tracking-tighter">{grandTotalChats.toLocaleString()}</h2>
+                <h2 className="text-3xl md:text-4xl font-black mt-2 text-slate-900 tracking-tighter">{grandTotalChats.toLocaleString()}</h2>
             </div>
             
-            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-white">
+            <div className="bg-white p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] shadow-xl border border-white">
                 <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center justify-between">
                   <span className="flex items-center gap-2"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> API Cost</span>
                   <span className="bg-blue-50 text-blue-500 px-2 py-0.5 rounded text-[8px]">{currentMonthName}</span>
                 </p>
-                <h2 className="text-3xl font-black mt-2 text-slate-700 tracking-tighter">Rp{totalCostIDR.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</h2>
+                <h2 className="text-2xl md:text-3xl font-black mt-2 text-slate-700 tracking-tighter">Rp{totalCostIDR.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</h2>
             </div>
             
-            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-emerald-100 bg-gradient-to-br from-white to-emerald-50">
+            <div className="bg-white p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] shadow-xl border border-emerald-100 bg-gradient-to-br from-white to-emerald-50">
                 <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest flex justify-between items-center">
                   <span>Gross Revenue (MRR)</span>
-                  <span className="bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded text-[8px]">{currentMonthName}</span>
+                  <span className="bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded text-[8px] hidden lg:block">{currentMonthName}</span>
                 </p>
-                <h2 className="text-3xl font-black mt-2 text-emerald-600 tracking-tighter">Rp{totalRevenue.toLocaleString('id-ID')}</h2>
+                <h2 className="text-2xl md:text-3xl font-black mt-2 text-emerald-600 tracking-tighter">Rp{totalRevenue.toLocaleString('id-ID')}</h2>
                 {totalOverlimitRevenue > 0 && <p className="text-[9px] text-emerald-500/70 font-bold mt-1">+Rp{totalOverlimitRevenue.toLocaleString('id-ID')} dari denda overlimit</p>}
             </div>
             
-            <div className="bg-slate-900 p-6 rounded-[2rem] shadow-2xl text-white relative overflow-hidden">
+            <div className="bg-slate-900 p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] shadow-2xl text-white relative overflow-hidden">
                 <div className="absolute -right-10 -bottom-10 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl"></div>
                 <p className="text-[10px] font-black opacity-50 uppercase tracking-widest flex justify-between items-center">
                   <span>Est. Net Profit</span>
-                  <span className="bg-white/10 px-2 py-0.5 rounded text-[8px]">{currentMonthName}</span>
+                  <span className="bg-white/10 px-2 py-0.5 rounded text-[8px] hidden lg:block">{currentMonthName}</span>
                 </p>
-                <h2 className="text-4xl font-black mt-2 tracking-tighter text-emerald-400">Rp{netProfit.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</h2>
+                <h2 className="text-3xl md:text-4xl font-black mt-2 tracking-tighter text-emerald-400">Rp{netProfit.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</h2>
             </div>
         </div>
 
-        <div className="flex gap-4 mb-6">
-          <div className="flex-1 relative">
-            <input type="text" placeholder="Cari nama bisnis klien..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-white border-none shadow-md rounded-2xl py-4 px-6 font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" />
+        <div className="flex flex-col sm:flex-row gap-3 md:gap-4 mb-6">
+          <div className="w-full sm:flex-1 relative">
+            <input type="text" placeholder="Cari nama bisnis klien..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-white border-none shadow-md rounded-xl md:rounded-2xl py-3.5 md:py-4 px-4 md:px-6 text-sm md:text-base font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-white border-none shadow-md rounded-2xl py-4 px-6 font-bold text-slate-600 outline-none cursor-pointer">
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="w-full sm:w-auto bg-white border-none shadow-md rounded-xl md:rounded-2xl py-3.5 md:py-4 px-4 md:px-6 text-sm md:text-base font-bold text-slate-600 outline-none cursor-pointer appearance-none">
             <option value="name">Urutkan: Nama (A-Z)</option>
             <option value="chat">Paling Banyak Chat</option>
             <option value="tokens">Resource Terbesar</option>
@@ -611,156 +637,193 @@ export default function SuperAdminDashboard() {
         </div>
 
         {/* TABEL UTAMA KLIEN */}
-        <div className="bg-white rounded-[3rem] shadow-2xl shadow-slate-200/40 border border-slate-50 overflow-hidden mb-12">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="bg-slate-50/50 text-[10px] text-slate-400 uppercase font-black tracking-[0.2em]">
-                <th className="px-6 py-7">Klien & Status</th>
-                <th className="px-6 py-7 text-center">Chat / Limit</th>
-                <th className="px-6 py-7 text-center">Premium Quota</th>
-                <th className="px-6 py-7 text-center">AI Capabilities</th> 
-                <th className="px-6 py-7 text-right">Tokens Used</th>
-                <th className="px-6 py-7 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={6} className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase">Memuat Sistem Radar...</td></tr>
-              ) : filteredAndSortedStats.length === 0 ? (
-                <tr><td colSpan={6} className="p-20 text-center font-bold text-slate-400">Tidak ada klien yang cocok dengan pencarian.</td></tr>
-              ) : filteredAndSortedStats.map((stat) => {
-                const overCount = Math.max(0, stat.totalChat - stat.limit);
-                return (
-                  <tr key={stat.id} className={`transition-all duration-300 ${!stat.isActive ? 'bg-red-50/30 opacity-75' : 'hover:bg-blue-50/30'}`}>
-                    <td className="px-6 py-6">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="font-black text-slate-800 text-lg tracking-tight flex items-center gap-2">
-                            {stat.name}
-                            {!stat.isActive && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded uppercase tracking-widest">Suspended</span>}
-                          </p>
-                          
-                          <div className="mt-1">
-                            <select 
-                              value={stat.plan}
-                              onChange={(e) => changeClientPlan(stat.id, stat.plan, stat.name, e.target.value)}
-                              className="text-[10px] font-bold text-blue-700 uppercase bg-blue-50 px-2 py-1 rounded cursor-pointer outline-none border border-blue-200 hover:border-blue-400 transition-colors shadow-sm"
-                            >
-                              <option value="Basic">Basic</option>
-                              <option value="Pro">Pro</option>
-                              <option value="Enterprise">Enterprise</option>
-                            </select>
+        <div className="bg-white rounded-[1.5rem] md:rounded-[3rem] shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] border border-slate-100 relative overflow-hidden mb-8 md:mb-12">
+          
+          {/* PEMBUNGKUS SCROLL (Max Height + Auto Y/X) */}
+          <div className="overflow-x-auto overflow-y-auto max-h-[500px] md:max-h-[600px] custom-scrollbar scroll-smooth relative z-10">
+            <table className="w-full text-left text-sm min-w-[1000px] border-collapse">
+              
+              {/* STICKY HEADER - Akan terus menempel di atas saat di-scroll */}
+              <thead className="sticky top-0 z-30">
+                <tr className="bg-slate-50/95 backdrop-blur-md text-[10px] text-slate-500 uppercase font-black tracking-[0.2em] shadow-sm">
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 whitespace-nowrap">Klien & Status</th>
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 text-center whitespace-nowrap">Chat / Limit</th>
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 text-center whitespace-nowrap">Premium Quota</th>
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 text-center whitespace-nowrap">AI Capabilities</th> 
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 text-right whitespace-nowrap">Tokens Used</th>
+                  <th className="px-4 py-5 md:px-6 md:py-6 border-b border-slate-200 text-right whitespace-nowrap">Action</th>
+                </tr>
+              </thead>
+              
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr><td colSpan={6} className="p-16 md:p-24 text-center font-black text-slate-300 animate-pulse uppercase tracking-widest">Memuat Radar Klien...</td></tr>
+                ) : filteredAndSortedStats.length === 0 ? (
+                  <tr><td colSpan={6} className="p-16 md:p-24 text-center font-bold text-slate-400">Tidak ada klien yang cocok dengan pencarian.</td></tr>
+                ) : filteredAndSortedStats.map((stat) => {
+                  const overCount = Math.max(0, stat.totalChat - stat.limit);
+                  return (
+                    <tr key={stat.id} className={`transition-all duration-300 ${!stat.isActive ? 'bg-red-50/30 opacity-75' : 'hover:bg-blue-50/30'}`}>
+                      <td className="px-4 py-5 md:px-6 md:py-6">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="min-w-[180px]">
+                            <p className="font-black text-slate-800 text-base md:text-lg tracking-tight flex flex-wrap items-center gap-2">
+                              {stat.name}
+                              {!stat.isActive && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded uppercase tracking-widest shrink-0 shadow-sm">Suspended</span>}
+                            </p>
+                            
+                            <div className="mt-1.5">
+                              <select 
+                                value={stat.plan}
+                                onChange={(e) => changeClientPlan(stat.id, stat.plan, stat.name, e.target.value)}
+                                className="text-[10px] font-black text-blue-700 uppercase bg-blue-50/80 px-2 py-1.5 rounded cursor-pointer outline-none border border-blue-200 hover:border-blue-400 hover:bg-blue-100 transition-all shadow-sm"
+                              >
+                                <option value="Basic">Basic</option>
+                                <option value="Pro">Pro</option>
+                                <option value="Enterprise">Enterprise</option>
+                              </select>
+                            </div>
+                          </div>
+                          <button onClick={() => toggleSuspend(stat.id, stat.isActive, stat.name)} className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 ${stat.isActive ? 'bg-red-50 text-red-500 hover:bg-red-500 hover:text-white' : 'bg-green-500 text-white hover:bg-green-600'}`} title={stat.isActive ? "Suspend Klien" : "Aktifkan Klien"}>
+                            <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          </button>
+                        </div>
+                      </td>
+                      
+                      <td className="px-4 py-5 md:px-6 md:py-6 text-center">
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span className={`font-mono font-black text-base md:text-xl ${overCount > 0 ? 'text-red-600' : 'text-slate-700'}`}>
+                            {stat.totalChat} <span className="text-xs md:text-sm font-medium text-slate-400">/ {stat.limit}</span>
+                          </span>
+                          <button onClick={() => adjustChatLimit(stat.id, stat.limit, stat.name)} className="text-[9px] font-black text-blue-500 bg-blue-50 px-2.5 py-1 rounded-md hover:bg-blue-600 hover:text-white transition-colors">Ubah Limit</button>
+                        </div>
+                        {overCount > 0 && <p className="text-[9px] font-black text-red-500 mt-2 bg-red-50 py-1 px-2.5 rounded-md inline-block shadow-sm">Denda: Rp {stat.overlimitPricePerChat}/chat</p>}
+                      </td>
+                      
+                      <td className="px-4 py-5 md:px-6 md:py-6">
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Left</p>
+                          <div className="flex items-center justify-center gap-1.5 md:gap-2 bg-slate-50/80 border border-slate-200 rounded-xl p-1 shadow-inner">
+                            <button onClick={() => adjustPremiumQuota(stat.id, stat.premiumQuota, -1, stat.name)} disabled={stat.premiumQuota <= 0} className="w-6 h-6 md:w-8 md:h-8 flex items-center justify-center bg-white text-slate-500 rounded-lg hover:bg-red-50 hover:text-red-500 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500 shadow-sm transition-all font-bold text-base md:text-xl leading-none shrink-0">−</button>
+                            <span className={`font-black font-mono text-[14px] md:text-[16px] w-6 md:w-8 text-center ${stat.premiumQuota <= 2 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>{stat.premiumQuota}</span>
+                            <button onClick={() => adjustPremiumQuota(stat.id, stat.premiumQuota, 1, stat.name)} className="w-6 h-6 md:w-8 md:h-8 flex items-center justify-center bg-white text-slate-500 rounded-lg hover:bg-green-50 hover:text-green-500 shadow-sm transition-all font-bold text-base md:text-xl leading-none shrink-0">+</button>
                           </div>
                         </div>
-                        <button onClick={() => toggleSuspend(stat.id, stat.isActive, stat.name)} className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-all ${stat.isActive ? 'bg-red-50 text-red-500 hover:bg-red-500 hover:text-white' : 'bg-green-500 text-white hover:bg-green-600'}`} title={stat.isActive ? "Suspend Klien" : "Aktifkan Klien"}>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        </button>
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-6 text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className={`font-mono font-black text-lg ${overCount > 0 ? 'text-red-600' : 'text-slate-700'}`}>
-                          {stat.totalChat} <span className="text-sm font-medium text-slate-400">/ {stat.limit}</span>
-                        </span>
-                        <button onClick={() => adjustChatLimit(stat.id, stat.limit, stat.name)} className="text-[9px] font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded hover:bg-blue-600 hover:text-white transition-colors mt-1">Ubah Limit</button>
-                      </div>
-                      {overCount > 0 && <p className="text-[9px] font-bold text-red-500 mt-2 bg-red-50 py-0.5 px-2 rounded">Denda: Rp {stat.overlimitPricePerChat}/chat</p>}
-                    </td>
-                    
-                    <td className="px-6 py-6">
-                      <div className="flex flex-col items-center justify-center gap-1.5">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Left</p>
-                        <div className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1 shadow-inner">
-                          <button onClick={() => adjustPremiumQuota(stat.id, stat.premiumQuota, -1, stat.name)} disabled={stat.premiumQuota <= 0} className="w-7 h-7 flex items-center justify-center bg-white text-slate-500 rounded-lg hover:bg-red-50 hover:text-red-500 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500 shadow-sm transition-all font-bold text-lg leading-none">−</button>
-                          <span className={`font-black text-[15px] w-6 text-center ${stat.premiumQuota <= 2 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>{stat.premiumQuota}</span>
-                          <button onClick={() => adjustPremiumQuota(stat.id, stat.premiumQuota, 1, stat.name)} className="w-7 h-7 flex items-center justify-center bg-white text-slate-500 rounded-lg hover:bg-green-50 hover:text-green-500 shadow-sm transition-all font-bold text-lg leading-none">+</button>
+                      </td>
+
+                      <td className="px-4 py-5 md:px-6 md:py-6 text-center">
+                        <div className="flex flex-col items-center gap-2 min-w-[130px]">
+                          <button onClick={() => toggleAddon(stat.id, stat.features, !stat.features?.has_addon, stat.name)} className={`w-full text-[9px] md:text-[10px] font-black px-3 md:px-4 py-2.5 rounded-xl uppercase transition-all shadow-sm ${stat.features?.has_addon ? 'bg-green-500 text-white' : 'bg-white text-slate-400 border border-slate-200 hover:border-blue-400 hover:text-blue-500'}`}>
+                            {stat.features?.has_addon ? "● Addon UI: ON" : "○ Addon UI: OFF"}
+                          </button>
+                          
+                          <button onClick={() => openToolModal(stat)} className="w-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white text-[9px] md:text-[10px] font-black px-3 md:px-4 py-2.5 rounded-xl uppercase transition-all shadow-sm flex items-center justify-center gap-1.5 md:gap-2">
+                            🤖 Tools ({stat.activeTools?.length || 0})
+                          </button>
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="px-6 py-6 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <button onClick={() => toggleAddon(stat.id, stat.features, !stat.features?.has_addon, stat.name)} className={`w-full text-[10px] font-black px-4 py-2 rounded-xl uppercase transition-all ${stat.features?.has_addon ? 'bg-green-500 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200 hover:border-blue-400'}`}>
-                          {stat.features?.has_addon ? "● Addon UI: ON" : "Addon UI: OFF"}
-                        </button>
-                        
-                        <button onClick={() => openToolModal(stat)} className="w-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white text-[10px] font-black px-4 py-2 rounded-xl uppercase transition-all shadow-sm flex items-center justify-center gap-2">
-                          🤖 Tools AI ({stat.activeTools?.length || 0})
-                        </button>
-                      </div>
-                    </td>
+                      <td className="px-4 py-5 md:px-6 md:py-6 text-right font-mono font-black text-blue-600 text-lg md:text-xl">{stat.totalTokens.toLocaleString()}</td>
+                      
+                      <td className="px-4 py-5 md:px-6 md:py-6 text-right">
+                         <div className="flex flex-col items-end gap-2.5 min-w-[120px]">
+                            <button onClick={() => downloadClientBilling(stat)} className="bg-slate-900 text-white text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg hover:bg-blue-600 transition-colors shadow-md w-full">Cetak Invoice</button>
+                            <button onClick={() => openDeleteModal(stat.id, stat.name)} className="bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg transition-colors shadow-sm w-full flex justify-center items-center gap-1.5">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Hapus
+                            </button>
+                         </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-                    <td className="px-6 py-6 text-right font-mono font-black text-blue-600 text-lg">{stat.totalTokens.toLocaleString()}</td>
-                    
-                    <td className="px-6 py-6 text-right flex flex-col items-end gap-2">
-                        <button onClick={() => downloadClientBilling(stat)} className="bg-slate-900 text-white text-[10px] font-bold px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors shadow-md w-full">Cetak Invoice</button>
-                        <button onClick={() => openDeleteModal(stat.id, stat.name)} className="bg-white border border-red-200 text-red-500 hover:bg-red-50 text-[10px] font-bold px-4 py-2 rounded-lg transition-colors shadow-sm w-full flex justify-center items-center gap-1">
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Hapus
-                        </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {/* EFEK FADE BOTTOM (Gradasi Putih Transparan) Biar Scroll-nya Elegan */}
+          <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-white to-transparent pointer-events-none z-20"></div>
+          
         </div>
 
         {/* ========================================================
             TABEL SYSTEM AUDIT TRAIL (LOG AKTIVITAS ADMIN)
         ======================================================== */}
-        <div className="bg-slate-900 rounded-[3rem] shadow-2xl border border-slate-800 overflow-hidden relative">
-           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="bg-gradient-to-b from-slate-900 to-[#0a0a0e] rounded-[1.5rem] md:rounded-[3rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] border border-slate-800 overflow-hidden relative group">
            
-           <div className="p-8 border-b border-slate-800 flex items-center justify-between relative z-10">
-              <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-slate-700">
-                    <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+           {/* EFEK BACKGROUND PREMIUM (Glow & Texture) */}
+           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/15 rounded-full blur-[100px] pointer-events-none transition-all duration-1000 group-hover:bg-blue-500/20"></div>
+           <div className="absolute bottom-0 left-0 w-80 h-80 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none"></div>
+           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.03] pointer-events-none"></div>
+           
+           {/* HEADER BAGIAN LOGS */}
+           <div className="p-6 md:p-8 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10 bg-slate-900/50 backdrop-blur-sm">
+              <div className="flex items-center gap-4">
+                 <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl md:rounded-2xl flex items-center justify-center border border-slate-700/50 shadow-inner">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-blue-400 drop-shadow-[0_0_10px_rgba(96,165,250,0.5)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                  </div>
                  <div>
-                    <h3 className="text-xl font-black text-white tracking-tight italic">System Audit Trail</h3>
-                    <p className="text-slate-400 text-xs font-medium mt-0.5">Live monitoring aktivitas admin (15 terakhir)</p>
+                    <h3 className="text-xl md:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400 tracking-tight italic">System Audit Trail</h3>
+                    <p className="text-slate-500 text-[10px] md:text-xs font-bold mt-0.5 tracking-wide">LIVE MONITORING KENDALI ADMIN</p>
                  </div>
               </div>
-              <div className="flex items-center gap-2">
-                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]"></span>
-                 <span className="text-[10px] font-black text-green-500 uppercase tracking-widest">Live</span>
+              <div className="flex items-center gap-2.5 bg-slate-950/50 px-3 py-1.5 rounded-full border border-slate-800 shadow-inner">
+                 <span className="relative flex h-2.5 w-2.5">
+                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                 </span>
+                 <span className="text-[10px] font-black text-green-400 uppercase tracking-widest shadow-green-500">Active</span>
               </div>
            </div>
 
-           <div className="overflow-x-auto relative z-10">
-              <table className="w-full text-left text-sm">
-                 <thead>
-                    <tr className="bg-slate-800/50 text-[10px] text-slate-500 uppercase font-black tracking-widest">
-                       <th className="px-8 py-5">Waktu Eksekusi</th>
-                       <th className="px-8 py-5">Pelaku (Admin)</th>
-                       <th className="px-8 py-5">Tindakan</th>
-                       <th className="px-8 py-5">Target Klien</th>
-                       <th className="px-8 py-5">Detail Perubahan</th>
+           {/* AREA TABEL DENGAN VERTICAL & HORIZONTAL SCROLL + STICKY HEADER */}
+           <div className="overflow-x-auto overflow-y-auto max-h-[450px] relative z-10 custom-scrollbar scroll-smooth">
+              <table className="w-full text-left text-sm min-w-[850px] border-collapse">
+                 <thead className="sticky top-0 z-20">
+                    <tr className="bg-slate-900/95 backdrop-blur-md text-[10px] text-slate-400 uppercase font-black tracking-[0.2em] shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+                       <th className="px-6 py-5 md:px-8 border-b border-slate-700/50 whitespace-nowrap">Waktu Eksekusi</th>
+                       <th className="px-6 py-5 md:px-8 border-b border-slate-700/50 whitespace-nowrap">Pelaku (Admin)</th>
+                       <th className="px-6 py-5 md:px-8 border-b border-slate-700/50 whitespace-nowrap">Tindakan</th>
+                       <th className="px-6 py-5 md:px-8 border-b border-slate-700/50 whitespace-nowrap">Target Klien</th>
+                       <th className="px-6 py-5 md:px-8 border-b border-slate-700/50">Detail Perubahan</th>
                     </tr>
                  </thead>
-                 <tbody className="divide-y divide-slate-800">
+                 <tbody className="divide-y divide-white/5">
                     {adminLogs.length === 0 ? (
-                       <tr><td colSpan={5} className="p-10 text-center text-slate-500 font-medium italic">Belum ada riwayat aktivitas.</td></tr>
+                       <tr>
+                          <td colSpan={5} className="p-16 text-center">
+                             <div className="flex flex-col items-center justify-center opacity-50">
+                                <svg className="w-12 h-12 text-slate-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
+                                <span className="text-slate-400 font-bold tracking-widest text-xs uppercase">Sistem Bersih. Belum ada aktivitas.</span>
+                             </div>
+                          </td>
+                       </tr>
                     ) : adminLogs.map((log) => (
-                       // [FIX] Menggunakan created_at sebagai ID unik yang stabil
-                       <tr key={log.created_at} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="px-8 py-4 text-slate-400 text-xs font-mono">
+                       <tr key={log.created_at} className="hover:bg-gradient-to-r hover:from-blue-900/20 hover:to-transparent transition-all duration-200 group/row">
+                          <td className="px-6 md:px-8 py-5 text-slate-400 text-[11px] font-mono whitespace-nowrap group-hover/row:text-slate-300">
                              {new Date(log.created_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </td>
-                          <td className="px-8 py-4 text-slate-300 font-medium text-xs">{log.admin_email}</td>
-                          <td className="px-8 py-4">
-                             <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase tracking-wider ${getActionColor(log.action_type)}`}>
+                          <td className="px-6 md:px-8 py-5 text-slate-300 font-bold text-xs whitespace-nowrap group-hover/row:text-white">
+                             {log.admin_email}
+                          </td>
+                          <td className="px-6 md:px-8 py-5 whitespace-nowrap">
+                             <span className={`text-[9px] font-black px-2.5 py-1.5 rounded-md border uppercase tracking-wider shadow-sm ${getActionColor(log.action_type)}`}>
                                 {log.action_type.replace('_', ' ')}
                              </span>
                           </td>
-                          <td className="px-8 py-4 text-white font-bold text-xs">{log.target_client}</td>
-                          <td className="px-8 py-4 text-slate-400 text-xs italic">{log.details}</td>
+                          <td className="px-6 md:px-8 py-5 text-slate-200 font-black text-xs whitespace-nowrap group-hover/row:text-blue-400 transition-colors">
+                             {log.target_client}
+                          </td>
+                          <td className="px-6 md:px-8 py-5 text-slate-400 text-xs italic min-w-[250px] leading-relaxed group-hover/row:text-slate-300">
+                             {log.details}
+                          </td>
                        </tr>
                     ))}
                  </tbody>
               </table>
            </div>
+           
+           {/* FADE BOTTOM EFFECT BIAR SCROLL TERLIHAT HALUS */}
+           <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-[#0a0a0e] to-transparent pointer-events-none z-30"></div>
         </div>
 
       </div>
