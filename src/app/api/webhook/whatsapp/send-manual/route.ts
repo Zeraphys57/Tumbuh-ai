@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 export async function POST(request: Request) {
   try {
     // ========================================================================
-    // 1. [FIX 1] AUTH CHECK OTOMATIS (Membaca Sesi Login via Cookies)
+    // 1. AUTH CHECK OTOMATIS (Sesi Login)
     // ========================================================================
     const cookieStore = cookies();
     const supabaseAuth = createServerClient(
@@ -28,21 +28,14 @@ export async function POST(request: Request) {
     const { clientSlug, customerPhone, text } = body;
 
     // ========================================================================
-    // 2. [FIX 2 & 3] VALIDASI INPUT (Mencegah Spam & Error Meta)
+    // 2. VALIDASI INPUT AWAL
     // ========================================================================
     if (!clientSlug || !customerPhone || !text) {
       return NextResponse.json({ error: "Data tidak lengkap" }, { status: 400 });
     }
     
-    // WhatsApp maksimal 4096 karakter per pesan
     if (text.length > 4096) {
       return NextResponse.json({ error: "Pesan terlalu panjang (Maksimal 4096 karakter)" }, { status: 400 });
-    }
-
-    // Format nomor internasional (Hanya angka, panjang 8-15 digit)
-    const phoneRegex = /^[1-9]\d{7,14}$/; 
-    if (!phoneRegex.test(customerPhone)) {
-      return NextResponse.json({ error: "Format nomor tidak valid" }, { status: 400 });
     }
 
     // ========================================================================
@@ -50,66 +43,85 @@ export async function POST(request: Request) {
     // ========================================================================
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY! // Pastikan Key ini ada di .env ya Bos!
     );
 
-    // Ambil Data Klien (Termasuk Email untuk cek kepemilikan)
-    const { data: client, error } = await supabaseAdmin
+    // [FIX 1]: Ganti select "email" jadi "id", karena tabel kita pakai relasi UUID
+    const { data: targetClient, error: clientError } = await supabaseAdmin
       .from("clients")
-      .select("email, whatsapp_phone_number_id, whatsapp_access_token")
+      .select("id, whatsapp_phone_number_id, whatsapp_access_token")
       .eq("slug", clientSlug)
       .single();
 
-    if (error || !client) {
-      return NextResponse.json({ error: "Klien tidak ditemukan" }, { status: 404 });
+    if (clientError || !targetClient) {
+      return NextResponse.json({ error: "Klien tidak ditemukan di Database" }, { status: 404 });
     }
 
     // ========================================================================
-    // 4. [FIX 1 - LANJUTAN] OWNERSHIP VALIDATION (Cek Kepemilikan)
+    // 4. [FIX 2] NEW OWNERSHIP VALIDATION (Enterprise Grade)
     // ========================================================================
-    const userEmail = user.email?.toLowerCase() || "";
-    const superAdmins = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "").toLowerCase().split(",");
-    
-    // User HANYA boleh ngirim pesan jika: Dia pemilik slug ini, ATAU dia Super Admin
-    const isOwner = client.email?.toLowerCase() === userEmail;
-    const isSuperAdmin = superAdmins.includes(userEmail);
+    // Intip role user yang sedang login
+    const { data: currentUser } = await supabaseAdmin
+      .from("clients")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isOwner = targetClient.id === user.id; // Apakah dia pemilik Node ini?
+    const isSuperAdmin = currentUser?.role === "super_admin"; // Atau dia Bos-nya?
 
     if (!isOwner && !isSuperAdmin) {
-      console.warn(`🚨 [SECURITY] User ${userEmail} mencoba membajak WA klien ${clientSlug}`);
-      return NextResponse.json({ error: "Anda tidak memiliki akses ke klien ini" }, { status: 403 });
+      console.warn(`🚨 [SECURITY BREACH] User ${user.id} mencoba membajak WA klien ${clientSlug}`);
+      return NextResponse.json({ error: "Anda tidak memiliki otoritas ke klien ini" }, { status: 403 });
     }
 
     // ========================================================================
-    // 5. EKSEKUSI PENGIRIMAN KE META GRAPH API
+    // 5. [FIX 3] SMART PHONE FORMATTER (Auto-Convert 0 ke 62)
     // ========================================================================
-    if (!client.whatsapp_phone_number_id || !client.whatsapp_access_token) {
+    // Buang semua karakter aneh (+, -, spasi)
+    let formattedPhone = customerPhone.replace(/\D/g, ""); 
+    
+    // Kalau depannya 0, sulap jadi 62 (Kode Indonesia) biar Meta nggak ngamuk
+    if (formattedPhone.startsWith("0")) {
+      formattedPhone = "62" + formattedPhone.substring(1);
+    }
+
+    if (formattedPhone.length < 9 || formattedPhone.length > 16) {
+      return NextResponse.json({ error: "Format nomor tidak masuk akal" }, { status: 400 });
+    }
+
+    // ========================================================================
+    // 6. EKSEKUSI PENGIRIMAN KE META GRAPH API
+    // ========================================================================
+    if (!targetClient.whatsapp_phone_number_id || !targetClient.whatsapp_access_token) {
       return NextResponse.json({ error: "Kredensial WhatsApp klien belum diatur" }, { status: 400 });
     }
 
-    const url = `https://graph.facebook.com/v18.0/${client.whatsapp_phone_number_id}/messages`;
+    const url = `https://graph.facebook.com/v18.0/${targetClient.whatsapp_phone_number_id}/messages`;
     
     const metaResponse = await fetch(url, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${client.whatsapp_access_token}`,
+        "Authorization": `Bearer ${targetClient.whatsapp_access_token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: customerPhone,
+        to: formattedPhone, // Pakai nomor yang sudah disulap
         type: "text",
         text: { preview_url: false, body: text },
       }),
     });
 
+    const metaResult = await metaResponse.json();
+
     if (!metaResponse.ok) {
-      const metaError = await metaResponse.json();
-      console.error("Meta API Error:", metaError);
-      return NextResponse.json({ error: "Gagal ngirim ke Meta API" }, { status: 500 });
+      console.error("❌ Meta API Error:", JSON.stringify(metaResult, null, 2));
+      return NextResponse.json({ error: "Gagal ngirim ke Meta API", details: metaResult }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    return NextResponse.json({ success: true, message_id: metaResult.messages[0].id }, { status: 200 });
 
   } catch (error) {
     console.error("Fatal Error Send Manual:", error);

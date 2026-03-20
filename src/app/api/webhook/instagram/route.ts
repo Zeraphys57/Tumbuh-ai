@@ -268,12 +268,20 @@ ATURAN PENTING:
       if (leadAgeHours < 24) shouldUpdate = true; 
     }
 
+    // [FIX: JINAKKAN BOM WAKTU DUPLIKASI LEAD]
+    // Kumpulkan info WA ke dalam kolom customer_needs, 
+    // AGAR customer_phone TETAP MENGGUNAKAN IG ID (Untuk keperluan Webhook Tracking)
+    let finalNeeds = extractedData.needs && extractedData.needs !== "null" ? extractedData.needs : "";
+    if (extractedData.phone && extractedData.phone !== "null") {
+       finalNeeds = `[WA Diberikan: ${extractedData.phone}] ` + finalNeeds;
+    }
+
     if (shouldUpdate) {
       const updatePayload: any = { full_chat: currentChatLog };
       if (extractedData.name && extractedData.name !== "null") updatePayload.customer_name = extractedData.name;
-      // Update nomor HP kalau user IG akhirnya ngasih nomor WA
-      if (extractedData.phone && extractedData.phone !== "null") updatePayload.customer_phone = extractedData.phone;
-      if (extractedData.needs && extractedData.needs !== "null") updatePayload.customer_needs = extractedData.needs;
+      
+      // HANYA UPDATE KEBUTUHAN, JANGAN SENTUH CUSTOMER_PHONE
+      if (finalNeeds) updatePayload.customer_needs = finalNeeds;
       if (extractedData.total_people && extractedData.total_people !== "null") updatePayload.total_people = extractedData.total_people;
       if (extractedData.booking_date && extractedData.booking_date !== "null") updatePayload.booking_date = extractedData.booking_date;
       if (extractedData.booking_time && extractedData.booking_time !== "null") updatePayload.booking_time = extractedData.booking_time;
@@ -283,9 +291,9 @@ ATURAN PENTING:
     } else {
       await supabase.from("leads").insert({
         client_id: client.id,
-        customer_name: extractedData.name && extractedData.name !== "null" ? extractedData.name : "IG User " + customerIgId,
-        customer_phone: extractedData.phone && extractedData.phone !== "null" ? extractedData.phone : customerIgId,
-        customer_needs: extractedData.needs && extractedData.needs !== "null" ? extractedData.needs : userMsg,
+        customer_name: extractedData.name && extractedData.name !== "null" ? extractedData.name : "IG User " + customerIgId.substring(0, 5),
+        customer_phone: customerIgId, // TETAP IG ID SEBAGAI IDENTIFIER UTAMA!
+        customer_needs: finalNeeds || userMsg,
         total_people: extractedData.total_people && extractedData.total_people !== "null" ? extractedData.total_people : null,
         booking_date: extractedData.booking_date && extractedData.booking_date !== "null" ? extractedData.booking_date : "-", 
         booking_time: extractedData.booking_time && extractedData.booking_time !== "null" ? extractedData.booking_time : "-",

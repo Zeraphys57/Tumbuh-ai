@@ -1,48 +1,99 @@
 import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(request: Request) {
   try {
-    const { clientSlug, customerPhone, text } = await request.json();
+    // ========================================================================
+    // 1. AUTH CHECK OTOMATIS (Sesi Login)
+    // ========================================================================
+    const cookieStore = cookies();
+    const supabaseAuth = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value },
+        },
+      }
+    );
 
+    const { data: { user } } = await supabaseAuth.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Akses ditolak. Sesi tidak valid." }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { clientSlug, customerPhone, text } = body;
+
+    // ========================================================================
+    // 2. VALIDASI INPUT AWAL
+    // ========================================================================
     if (!clientSlug || !customerPhone || !text) {
       return NextResponse.json({ error: "Data tidak lengkap" }, { status: 400 });
     }
 
-    // 1. Ambil data klien dari Supabase untuk dapat token IG
-    const { data: client, error: clientError } = await supabase
+    // Instagram message text limit (sekitar 1000 karakter idealnya)
+    if (text.length > 1000) {
+      return NextResponse.json({ error: "Pesan terlalu panjang (Maksimal 1000 karakter)" }, { status: 400 });
+    }
+
+    // ========================================================================
+    // 3. SETUP SERVICE ROLE UNTUK QUERY DATABASE
+    // ========================================================================
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY! // Pastikan Key ini aman di .env
+    );
+
+    // ========================================================================
+    // 4. AMBIL DATA KLIEN & CEK KEPEMILIKAN (SECURITY LAYER)
+    // ========================================================================
+    const { data: targetClient, error: clientError } = await supabaseAdmin
       .from("clients")
-      .select("instagram_access_token, instagram_account_id")
+      .select("id, instagram_access_token, instagram_account_id")
       .eq("slug", clientSlug)
       .single();
 
-    if (clientError || !client) {
-      return NextResponse.json({ error: "Client tidak ditemukan" }, { status: 404 });
+    if (clientError || !targetClient) {
+      return NextResponse.json({ error: "Klien tidak ditemukan di Database" }, { status: 404 });
     }
 
-    const { instagram_access_token, instagram_account_id } = client;
+    // Intip role user yang sedang login
+    const { data: currentUser } = await supabaseAdmin
+      .from("clients")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
 
-    if (!instagram_access_token || !instagram_account_id) {
-       return NextResponse.json({ error: "Token atau ID Instagram Klien belum disetting" }, { status: 400 });
+    const isOwner = targetClient.id === user.id; // Apakah dia pemilik Node ini?
+    const isSuperAdmin = currentUser?.role === "super_admin"; // Atau dia Bos-nya?
+
+    if (!isOwner && !isSuperAdmin) {
+      console.warn(`🚨 [SECURITY BREACH] User ${user.id} mencoba membajak IG klien ${clientSlug}`);
+      return NextResponse.json({ error: "Anda tidak memiliki otoritas ke klien ini" }, { status: 403 });
     }
 
-    // 2. Kirim pesan pakai Instagram Graph API
-    // Catatan: customerPhone di sini sebenarnya berisi IG ID pelanggan
-    const igApiUrl = `https://graph.facebook.com/v18.0/${instagram_account_id}/messages`;
+    // ========================================================================
+    // 5. EKSEKUSI PENGIRIMAN KE INSTAGRAM GRAPH API
+    // ========================================================================
+    if (!targetClient.instagram_access_token || !targetClient.instagram_account_id) {
+      return NextResponse.json({ error: "Kredensial Instagram klien belum diatur" }, { status: 400 });
+    }
 
-    const response = await fetch(igApiUrl, {
+    // Catatan: customerPhone di sini sebenarnya berisi IG Scoped ID pelanggan
+    const igApiUrl = `https://graph.facebook.com/v18.0/${targetClient.instagram_account_id}/messages`;
+
+    const metaResponse = await fetch(igApiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${instagram_access_token}`,
+        "Authorization": `Bearer ${targetClient.instagram_access_token}`,
       },
       body: JSON.stringify({
         recipient: {
-          id: customerPhone, // ID Customer Instagram
+          id: customerPhone, 
         },
         message: {
           text: text,
@@ -50,17 +101,17 @@ export async function POST(request: Request) {
       }),
     });
 
-    const responseData = await response.json();
+    const metaResult = await metaResponse.json();
 
-    if (!response.ok) {
-      console.error("❌ Gagal kirim IG:", responseData);
-      return NextResponse.json({ error: "Gagal mengirim pesan IG", detail: responseData }, { status: response.status });
+    if (!metaResponse.ok) {
+      console.error("❌ Meta API Error (IG):", JSON.stringify(metaResult, null, 2));
+      return NextResponse.json({ error: "Gagal mengirim ke IG API", details: metaResult }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: "Pesan IG berhasil dikirim!" }, { status: 200 });
+    return NextResponse.json({ success: true, message_id: metaResult.message_id }, { status: 200 });
 
   } catch (error) {
-    console.error("❌ Fatal Error send-manual IG:", error);
+    console.error("Fatal Error Send Manual IG:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
