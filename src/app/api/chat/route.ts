@@ -14,7 +14,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// [FIX 2 & 5]: RATE LIMIT MAP DENGAN AUTO-CLEANUP (ANTI MEMORY LEAK)
+// RATE LIMIT MAP DENGAN AUTO-CLEANUP (ANTI MEMORY LEAK)
 const rateLimitMap = new Map<string, number>();
 setInterval(() => {
   const now = Date.now();
@@ -26,10 +26,18 @@ setInterval(() => {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    
+    // ========================================================================
+    // [FIX 🟡]: WHITELIST & VALIDASI SOURCE PLATFORM (ANTI-MANIPULASI)
+    // ========================================================================
+    const VALID_PLATFORMS = ["WEB", "WHATSAPP", "INSTAGRAM"];
+    const rawSource = String(body.source || "WEB").toUpperCase();
+    const platformName = VALID_PLATFORMS.includes(rawSource) ? rawSource : "WEB";
+
     const { message, clientId, history } = body;
 
     // ========================================================================
-    // [FIX 2]: VALIDASI INPUT KERAS (KEAMANAN & BIAYA)
+    // VALIDASI INPUT KERAS (KEAMANAN & BIAYA)
     // ========================================================================
     if (!message || !clientId) {
       return NextResponse.json({ reply: "Sistem membutuhkan data yang lengkap." }, { status: 400 });
@@ -37,20 +45,20 @@ export async function POST(req: Request) {
     if (typeof message !== 'string' || message.trim().length === 0) {
       return NextResponse.json({ reply: "Pesan tidak boleh kosong ya Kak 😊" }, { status: 400 });
     }
-    // Cegah serangan "Prompt Injection" atau Spam Karakter
     if (message.length > 2000) {
       return NextResponse.json({ reply: "Wah, pesannya kepanjangan nih Kak. Bisa diringkas sedikit? 😊" }, { status: 400 });
     }
 
     // ========================================================================
-    // 1. RATE LIMITING (ANTI SPAM) - [FIX 3]: DIBUAT UNIK PER CLIENT + IP/USER
+    // 1. RATE LIMITING (ANTI SPAM) - [FIX 🟡]: 2 DETIK UNTUK UX WEB CHAT
     // ========================================================================
     const ip = req.headers.get("x-forwarded-for") || "anonymous";
     const rateLimitKey = `${clientId}_${ip}`; 
     const now = Date.now();
     const lastRequest = rateLimitMap.get(rateLimitKey);
     
-    if (lastRequest && now - lastRequest < 4000) { 
+    // Diubah jadi 2000ms agar lebih nyaman buat user biasa
+    if (lastRequest && now - lastRequest < 2000) { 
       return NextResponse.json({ reply: "Ketiknya pelan-pelan saja ya Kak... 🙏" }, { status: 429 });
     }
     rateLimitMap.set(rateLimitKey, now);
@@ -64,7 +72,13 @@ export async function POST(req: Request) {
       .eq("slug", clientId)
       .single();
 
-    if (clientError || !client) throw new Error(`Client dengan slug ${clientId} tidak ditemukan`);
+    // [FIX 🔴]: MENCEGAH INTERNAL ERROR LEAK KE USER LOG
+    if (clientError || !client) {
+      console.error(`[CHAT API] Client tidak valid atau tidak ditemukan. Slug: ${clientId}`);
+      return NextResponse.json({ 
+        reply: "Sistem sedang memuat data atau asisten tidak tersedia. Silakan coba lagi nanti." 
+      }, { status: 404 });
+    }
     
     if (client.is_active === false) {
       console.log(`⛔ Web Chat Ditolak: Klien ${clientId} sedang di-suspend.`);
@@ -98,6 +112,8 @@ export async function POST(req: Request) {
     let ragContextText = "";
     try {
       const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
+      
+      // RAG tetap MURNI menggunakan pesan user agar pencocokan vektor akurat
       const embedResult = await embeddingModel.embedContent({
         content: { role: "user", parts: [{ text: message }] },
         taskType: "RETRIEVAL_QUERY", 
@@ -128,8 +144,14 @@ export async function POST(req: Request) {
       console.error("RAG Search Engine Error:", ragErr);
     }
 
+    // ========================================================================
     // 4. MASTER PROMPT SINKRONISASI (GABUNGAN SEMUA OTAK)
+    // ========================================================================
     const masterBasePrompt = `Kamu adalah Customer Success & Sales Representative profesional dari sebuah bisnis.
+
+=== INFORMASI PLATFORM (SANGAT PENTING) ===
+[PLATFORM: ${platformName}]
+Pesan ini datang dari platform ${platformName}. Kamu WAJIB mengikuti instruksi khusus untuk platform ini (terutama cara meminta nomor WhatsApp/HP) seperti yang tertulis di bagian KONTEKS BISNIS KLIEN.
 
 === ATURAN BESI (HUKUM MUTLAK, DILARANG KERAS DILANGGAR) ===
 1. BATASAN PENGETAHUAN (ANTI-HALUSINASI):
@@ -176,19 +198,43 @@ ${ragContextText}`;
     const model = genAI.getGenerativeModel(modelOptions);
 
     // ========================================================================
-    // [FIX 3]: BATASI HISTORY CHAT (ANTI MEMORY/TOKEN MELEDAK)
+    // [FIX 🟢]: FILTER HISTORY KETAT & SELANG-SELING (ANTI ERROR GEMINI)
     // ========================================================================
     const MAX_HISTORY = 30; 
-    const safeHistory = history && Array.isArray(history)
-      ? history
-          .slice(-MAX_HISTORY)
-          .map((msg: any) => ({ 
-             role: (msg.role === "ai" || msg.role === "assistant" || msg.role === "model") ? "model" : "user", 
-             parts: [{ text: msg.content }] 
-          }))
-      : [];
+    let safeHistory: any[] = [];
+
+    if (history && Array.isArray(history)) {
+      // 1. Bersihkan elemen kosong & standarisasi role ('user' atau 'model')
+      const rawCleaned = history
+        .filter((msg: any) => msg.content && msg.content.trim() !== "") 
+        .map((msg: any) => ({ 
+           role: (msg.role === "ai" || msg.role === "assistant" || msg.role === "model") ? "model" : "user", 
+           parts: [{ text: msg.content }] 
+        }));
+
+      // 2. Gabungkan role yang berurutan (Gemini WAJIB User -> Model -> User)
+      for (const msg of rawCleaned) {
+        if (safeHistory.length === 0) {
+          safeHistory.push(msg);
+        } else {
+          const lastMsg = safeHistory[safeHistory.length - 1];
+          // Jika role-nya sama dengan pesan sebelumnya (tabrakan)
+          if (lastMsg.role === msg.role) {
+            lastMsg.parts[0].text += "\n\n" + msg.parts[0].text; // Gabungkan teksnya
+          } else {
+            safeHistory.push(msg); // Jika beda, masukkan secara normal
+          }
+        }
+      }
+
+      // 3. Pangkas history agar tidak kepanjangan
+      safeHistory = safeHistory.slice(-MAX_HISTORY);
+    }
 
     const chat = model.startChat({ history: safeHistory });
+
+    // [FIX 🔴]: MENGIRIM PESAN USER SECARA MURNI, TANPA EMBEL-EMBEL LABEL
+    console.log(`[OMNICHANNEL ROUTER] Meneruskan pesan ke Gemini dengan mode platform: ${platformName}`);
     const result = await chat.sendMessage(message);
     let response = await result.response;
     let reply: string = "";
@@ -237,7 +283,7 @@ ${ragContextText}`;
       total_tokens: usage.totalTokenCount
     }) : Promise.resolve();
 
-    const extractPromise = runWebLeadExtraction(clientData.id, message, reply, safeHistory);
+    const extractPromise = runWebLeadExtraction(clientData.id, message, reply, safeHistory, platformName);
 
     await Promise.all([extractPromise, logPromise]).catch(err => console.error("Web Extractor Error:", err));
 
@@ -250,18 +296,10 @@ ${ragContextText}`;
 }
 
 // ============================================================================
-// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (BOLA SALJU DIHAPUS 🌟)
+// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (TETAP SAMA SEPERTI SEBELUMNYA) 🌟
 // ============================================================================
-// ============================================================================
-// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (ANTI GAGAL JSON & DEBUG READY) 🌟
-// ============================================================================
-// ============================================================================
-// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (ANTI GAGAL JSON & DEBUG READY) 🌟
-// ============================================================================
-async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[]) {
+async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[], platformName: string) {
   try {
-    console.log("🔍 Extraction started, history length:", history.length);
-    
     const leadSchema: any = {
       type: SchemaType.OBJECT,
       properties: {
@@ -288,39 +326,25 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
     const rawText = extractionResult.response.text().trim();
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
-    
-    console.log("🔍 Hasil Ekstraksi AI:", extractedData);
 
     if (extractedData.phone && extractedData.phone !== "null" && extractedData.phone.length > 5) {
-      console.log("📱 Nomor terdeteksi:", extractedData.phone);
-      
       let phoneNumber = String(extractedData.phone).replace(/[^0-9]/g, ""); 
       if (phoneNumber.startsWith("0")) phoneNumber = "62" + phoneNumber.substring(1);
       else if (phoneNumber.startsWith("8")) phoneNumber = "62" + phoneNumber;
 
-      // [FIX KRITIKAL]: Hapus updated_at dari select agar query TIDAK ERROR!
       const { data: oldLead, error: selectError } = await supabase
         .from("leads")
         .select("id, full_chat, customer_name, customer_needs, total_people, booking_date, booking_time, is_bot_active")
         .eq("client_id", clientUUID)
         .eq("customer_phone", phoneNumber)
-        .order('created_at', { ascending: false }) // Urutkan dari yang paling baru
-        .limit(1) // Ambil 1 aja yang paling pucuk
-        .maybeSingle(); // Dijamin aman sentosa!
+        .order('created_at', { ascending: false }) 
+        .limit(1) 
+        .maybeSingle(); 
 
-      if (selectError) {
-         console.error("❌ DB Select Error:", selectError.message);
-      }
+      if (selectError) console.error("❌ DB Select Error:", selectError.message);
 
       const newTurnLog = `User: ${userMessage}\nBot: ${botReply}`;
-      let finalChatToSave;
-
-      if (oldLead?.full_chat) {
-        // Langsung append tanpa cek waktu (Lebih aman dan stabil)
-        finalChatToSave = oldLead.full_chat + "\n\n" + newTurnLog;
-      } else {
-        finalChatToSave = newTurnLog; 
-      }
+      let finalChatToSave = oldLead?.full_chat ? oldLead.full_chat + "\n\n" + newTurnLog : newTurnLog;
 
       const MAX_CHAT_LENGTH = 30000; 
       if (finalChatToSave.length > MAX_CHAT_LENGTH) {
@@ -343,22 +367,14 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
         booking_time: finalTime,
         full_chat: finalChatToSave, 
         is_bot_active: oldLead ? oldLead.is_bot_active : true, 
-        platform: 'web'
+        platform: platformName.toLowerCase()
       };
 
-      // [FIX RADAR]: Pasang deteksi error yang jujur saat Update/Insert
       if (oldLead) {
-         const { error: updateErr } = await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
-         if (updateErr) console.error("❌ Update DB Error:", updateErr.message);
-         else console.log(`✅ Update Chat ke DB Sukses: ${phoneNumber}`);
+         await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
       } else {
-         const { error: insertErr } = await supabase.from("leads").insert(leadPayload);
-         if (insertErr) console.error("❌ Insert DB Error:", insertErr.message);
-         else console.log(`✅ Insert Lead Baru Sukses: ${phoneNumber}`);
+         await supabase.from("leads").insert(leadPayload);
       }
-      
-    } else {
-      console.log("⚠️ Nomor HP belum diberikan oleh user. Skiping save to database.");
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error:", extractError);

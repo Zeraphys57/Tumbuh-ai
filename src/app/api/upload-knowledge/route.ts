@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { extractText } from "unpdf";
 
@@ -22,6 +24,22 @@ function smartChunkText(text: string, chunkSize: number = 1000, overlap: number 
 
 export async function POST(req: Request) {
   try {
+    // ========================================================
+    // [FIX 🔴]: AUTH CHECK (MENCEGAH UPLOAD ILEGAL)
+    // ========================================================
+    const cookieStore = cookies();
+    const supabaseAuth = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { get(name) { return cookieStore.get(name)?.value } } }
+    );
+
+    const { data: { user } } = await supabaseAuth.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Sesi telah habis, harap login kembali." }, { status: 401 });
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
     const clientSlug = formData.get("clientId") as string; 
@@ -31,6 +49,12 @@ export async function POST(req: Request) {
     }
 
     const clientId = clientSlug;
+
+    // Pastikan user hanya bisa upload ke Client ID miliknya sendiri
+    if (user.id !== clientId) {
+      return NextResponse.json({ error: "Forbidden. Anda tidak memiliki akses ke data klien ini." }, { status: 403 });
+    }
+
     const fileName = file.name;
 
     const { data: clientData, error: clientError } = await supabase
@@ -44,7 +68,7 @@ export async function POST(req: Request) {
     }
 
     // ========================================================
-    // [FIX 2: KRITIKAL] CEGAH DUPLIKAT DOKUMEN
+    // CEGAH DUPLIKAT DOKUMEN
     // ========================================================
     const { data: existingDoc } = await supabase
       .from("client_knowledge")
@@ -61,14 +85,26 @@ export async function POST(req: Request) {
 
     console.log(`[RAG ENGINE] Memproses: ${fileName} untuk klien: ${clientSlug}`);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const pdfBuffer = new Uint8Array(arrayBuffer); 
-    
-    const extracted: any = await extractText(pdfBuffer);
-    
-    const fullText: string = Array.isArray(extracted.text) 
-      ? extracted.text.join(" ") 
-      : String(extracted.text || "");
+    // ========================================================
+    // JALUR GANDA UNTUK PDF DAN MARKDOWN
+    // ========================================================
+    const fileNameLower = fileName.toLowerCase();
+    let fullText = "";
+
+    if (fileNameLower.endsWith(".pdf") || file.type === "application/pdf") {
+      console.log(`[RAG ENGINE] Mengekstrak teks dari file PDF...`);
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfBuffer = new Uint8Array(arrayBuffer); 
+      const extracted: any = await extractText(pdfBuffer);
+      fullText = Array.isArray(extracted.text) ? extracted.text.join(" ") : String(extracted.text || "");
+      
+    } else if (fileNameLower.endsWith(".md") || file.type.includes("markdown") || file.type.includes("text")) {
+      console.log(`[RAG ENGINE] Mengekstrak teks dari file Markdown...`);
+      fullText = await file.text();
+      
+    } else {
+      return NextResponse.json({ error: "Format file tidak didukung. Harap gunakan PDF atau .md" }, { status: 400 });
+    }
     
     let rawText = fullText.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
 
@@ -78,19 +114,18 @@ export async function POST(req: Request) {
 
     if (rawText.length < 1500) { 
       return NextResponse.json({ 
-        error: "❌ DOKUMEN TERLALU PENDEK! Silakan Copy-Paste isi PDF ini ke kotak 'AI Trainer' di atas agar AI merespon 10x lebih cepat." 
+        error: "❌ DOKUMEN TERLALU PENDEK! Silakan Copy-Paste isi dokumen ini ke kotak 'AI Trainer' di atas agar AI merespon lebih cepat." 
       }, { status: 400 });
     }
 
     const textChunks = smartChunkText(rawText, 1000, 200);
-    console.log(`[RAG ENGINE] PDF dipotong menjadi ${textChunks.length} chunks.`);
+    console.log(`[RAG ENGINE] Dokumen dipotong menjadi ${textChunks.length} chunks.`);
 
     // ========================================================
-    // [FIX 4: MASTERPIECE DARI CLAUDE] AUTO-RETRY ANTI-RATE LIMIT
+    // [FIX 🟡]: AUTO-RETRY HANYA UNTUK RATE LIMIT (429)
     // ========================================================
     const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
     
-    // Fungsi khusus untuk ngakalin Google API kalau tiba-tiba nolak (Error 429)
     const embedWithRetry = async (chunk: string, retries = 3): Promise<any> => {
       for (let attempt = 0; attempt < retries; attempt++) {
         try {
@@ -100,26 +135,27 @@ export async function POST(req: Request) {
             outputDimensionality: 1536
           } as any);
         } catch (err: any) {
-          if (attempt === retries - 1) throw err; // Menyerah kalau udah 3x gagal
+          const isRateLimit = err?.status === 429 || 
+             String(err?.message).includes('429') || 
+             String(err?.message).toLowerCase().includes('rate');
+
+          if (attempt === retries - 1 || !isRateLimit) throw err; // Lempar error jika bukan 429 atau jatah habis
+          
           console.warn(`[RAG ENGINE] Rate Limit Google terdeteksi! Sabar... Mencoba lagi dalam ${attempt + 1} detik (Percobaan ${attempt + 1}/${retries})`);
-          // Exponential backoff: Makin sering gagal, makin lama nunggunya (1 dtk, 2 dtk, dst)
           await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         }
       }
     };
 
     // ========================================================
-    // [FIX 1: KRITIKAL] PARALLEL BATCH EMBEDDING (ANTI-TIMEOUT)
+    // PARALLEL BATCH EMBEDDING (ANTI-TIMEOUT)
     // ========================================================
     const databaseRows: any[] = [];
-    const BATCH_SIZE = 5; // Memproses 5 chunks sekaligus
+    const BATCH_SIZE = 5;
 
     for (let i = 0; i < textChunks.length; i += BATCH_SIZE) {
       const batchChunks = textChunks.slice(i, i + BATCH_SIZE);
-      
-      // MENGGUNAKAN FUNGSI RETRY DARI CLAUDE DI SINI!
       const embedPromises = batchChunks.map(chunk => embedWithRetry(chunk));
-
       const batchResults = await Promise.all(embedPromises);
 
       batchResults.forEach((result, idx) => {
@@ -131,14 +167,13 @@ export async function POST(req: Request) {
         });
       });
 
-      // Jeda 200ms normal antar batch
       if (i + BATCH_SIZE < textChunks.length) {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
     // ========================================================
-    // [FIX 3: PENTING] BATCH INSERT SUPABASE DENGAN ROLLBACK
+    // BATCH INSERT SUPABASE DENGAN ROLLBACK
     // ========================================================
     const INSERT_BATCH = 20; 
     
@@ -150,13 +185,20 @@ export async function POST(req: Request) {
         .insert(batchRows);
 
       if (insertError) {
-        console.error(`Gagal insert batch ke-${i/INSERT_BATCH}:`, insertError);
+        console.error(`Gagal insert batch ke-${i/INSERT_BATCH}:`, insertError.message);
         
-        await supabase
+        // [FIX TERAKHIR]: Pastikan rollback tidak gagal diam-diam
+        const { error: rollbackErr } = await supabase
           .from("client_knowledge")
           .delete()
           .eq("client_id", clientId)
           .eq("document_name", fileName);
+
+        if (rollbackErr) {
+          console.error("⚠️ FATAL: Rollback gagal! Data mungkin kotor/setengah masuk:", rollbackErr.message);
+        } else {
+          console.warn("♻️ Rollback berhasil. Sisa data yang sempat masuk telah dibersihkan.");
+        }
 
         throw new Error("Gagal menyimpan memori ke database. Perubahan otomatis dibatalkan.");
       }
@@ -171,7 +213,10 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("[RAG ENGINE] Error:", error.message);
-    return NextResponse.json({ error: error.message || "Terjadi kesalahan internal saat memproses PDF." }, { status: 500 });
+    // ========================================================
+    // [FIX 🔴]: MENCEGAH ERROR LEAK KE CLIENT
+    // ========================================================
+    console.error("[RAG ENGINE] Fatal Error:", error.message);
+    return NextResponse.json({ error: "Terjadi kesalahan internal. Silakan coba lagi." }, { status: 500 });
   }
 }
