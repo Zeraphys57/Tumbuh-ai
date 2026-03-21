@@ -20,7 +20,34 @@ interface ChatMessage {
   date: string;
 }
 
-const MESSAGES_PER_PAGE = 50; 
+const MESSAGES_PER_PAGE = 50;
+
+// ==========================================================
+// [FIX & SECURE]: Mengubah Markdown (*teks*) menjadi HTML (<b>teks</b>)
+// DENGAN SANITASI XSS (Thanks to Pak Claude!)
+// ==========================================================
+const formatChatMessage = (text: string) => {
+  if (!text) return "";
+  
+  // 1. ESCAPE HTML DULU (WAJIB & KRUSIAL!)
+  // Ini akan mengubah <script> menjadi &lt;script&gt; (teks mati, tidak bisa dieksekusi)
+  let safe = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // 2. Baru parsing markdown setelah aman
+  // Convert **text** atau *text* menjadi <strong>text</strong>
+  safe = safe.replace(/(?:\*\*|\*)(.*?)(?:\*\*|\*)/g, '<strong>$1</strong>');
+  
+  // Convert _text_ menjadi <em>text</em> (italic)
+  safe = safe.replace(/_(.*?)_/g, '<em>$1</em>');
+  
+  // Convert enter (\n) menjadi <br />
+  safe = safe.replace(/\n/g, '<br />');
+
+  return safe;
+};
 
 export default function LiveChat() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -33,7 +60,7 @@ export default function LiveChat() {
 
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isSwitchingChat, setIsSwitchingChat] = useState(false); // [FIX 2]: State loading saat ganti orang
+  const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
   const [offset, setOffset] = useState(0);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +77,6 @@ export default function LiveChat() {
     activePhoneRef.current = activePhone;
   }, [activePhone]);
 
-  // Fungsi helper untuk scroll tanpa bikin layar website lompat (Membunuh bug snapping)
   const scrollToBottom = () => {
     setTimeout(() => {
       if (chatContainerRef.current) {
@@ -95,19 +121,17 @@ export default function LiveChat() {
             'postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'chat_logs', filter: `client_id=eq.${slug}` },
             (payload) => {
-              // 1. Kalau ini chat yang lagi dibuka, tambahkan ke bubble
               if (payload.new.customer_phone === activePhoneRef.current) {
                 setChatLogs((prev) => {
                   if (prev.some(msg => msg.id === payload.new.id)) return prev;
                   return [...prev, payload.new];
                 });
-                scrollToBottom(); // [FIX 1]: Ganti scrollIntoView dengan Smart Scroll
+                scrollToBottom(); 
               }
               
-              // 2. [FIX 3]: AUTO-BUMP KE ATAS! Kalau ada chat baru, geser kontak ke urutan 1
               setLeads((prev) => {
                 const targetIndex = prev.findIndex(l => l.customer_phone === payload.new.customer_phone);
-                if (targetIndex > 0) { // Kalau bukan urutan pertama, kita srobot ke atas!
+                if (targetIndex > 0) { 
                   const newLeads = [...prev];
                   const [bumpedLead] = newLeads.splice(targetIndex, 1);
                   return [bumpedLead, ...newLeads];
@@ -142,7 +166,7 @@ export default function LiveChat() {
     if (!activePhone || !clientSlug) return;
 
     const fetchInitialChats = async () => {
-      setIsSwitchingChat(true); // Mulai loading ganti chat biar gak nge-flash/lompat
+      setIsSwitchingChat(true); 
       setOffset(0);
       setHasMore(true);
 
@@ -160,7 +184,7 @@ export default function LiveChat() {
         setHasMore(data.length === MESSAGES_PER_PAGE);
         scrollToBottom();
       }
-      setIsSwitchingChat(false); // Selesai loading
+      setIsSwitchingChat(false); 
     };
 
     fetchInitialChats();
@@ -237,9 +261,6 @@ export default function LiveChat() {
       return;
     }
 
-    // ==========================================================
-    // [FIX]: Guard Limit Karakter Diturunkan ke 2000 (UX Lebih Baik)
-    // ==========================================================
     if (inputText.trim().length > 2000) {
       alert("⚠️ Pesan terlalu panjang! Maksimal 2000 karakter per pesan agar nyaman dibaca oleh pelanggan.");
       return;
@@ -248,7 +269,6 @@ export default function LiveChat() {
     const sentText = inputText;
     setInputText(""); 
 
-    // 1. BUAT PESAN SEMENTARA (OPTIMISTIC UI)
     const tempId = `temp-${Date.now()}`;
     const optimisticMessage = {
       id: tempId,
@@ -261,11 +281,9 @@ export default function LiveChat() {
       created_at: new Date().toISOString()
     };
 
-    // 2. MUNCULKAN INSTAN
     setChatLogs(prev => [...prev, optimisticMessage]);
     scrollToBottom();
 
-    // 3. AUTO-BUMP
     setLeads((prev) => {
       const targetIndex = prev.findIndex(l => l.customer_phone === activePhone);
       if (targetIndex > 0) {
@@ -276,7 +294,6 @@ export default function LiveChat() {
       return prev;
     });
 
-    // 4. SIMPAN DATABASE BACKGROUND
     const { data: dbData, error: dbError } = await supabase.from('chat_logs').insert({
         client_id: clientSlug,
         customer_phone: activePhone,
@@ -286,23 +303,15 @@ export default function LiveChat() {
         platform: activeLead.platform || 'whatsapp'
     }).select().single();
 
-    // ==========================================================
-    // [FIX DARI PAK CLAUDE]: Rollback Optimistic UI jika DB Gagal
-    // ==========================================================
     if (dbError) {
       console.error("❌ Gagal simpan chat ke DB:", dbError);
-      
-      // Tarik mundur (hapus) pesan dari layar
       setChatLogs(prev => prev.filter(msg => msg.id !== tempId));
       alert("❌ Gagal mengirim pesan ke sistem. Silakan coba lagi.");
-      
-      return; // 🛑 HENTIKAN PROSES! Jangan dikirim ke Meta kalau DB aja gagal
+      return; 
     } else if (dbData) {
-      // Timpa ID sementara dengan ID asli dari Supabase
       setChatLogs(prev => prev.map(msg => msg.id === tempId ? dbData : msg));
     }
 
-    // 5. KIRIM KE META
     try {
       const apiUrl = activeLead.platform === 'instagram' ? '/api/webhook/instagram/send-manual' : '/api/webhook/whatsapp/send-manual';
       await fetch(apiUrl, {
@@ -359,7 +368,6 @@ export default function LiveChat() {
       {/* KANAN: Area Chat */}
       {activeLead ? (
         <div className="w-2/3 flex flex-col min-h-0 bg-slate-950 relative">
-          {/* Background Elegen */}
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-[0.03] pointer-events-none z-0"></div>
           <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none z-0"></div>
           
@@ -392,7 +400,6 @@ export default function LiveChat() {
             onScroll={handleScroll}
             className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 z-10 custom-scrollbar relative scroll-smooth"
           >
-            {/* Animasi Loading Transisi Lembut */}
             {isSwitchingChat && (
                <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center z-50">
                   <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-3"></div>
@@ -429,7 +436,14 @@ export default function LiveChat() {
                         ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-tr-sm shadow-[0_0_20px_rgba(37,99,235,0.15)] border border-blue-500/30'
                         : 'bg-slate-700/80 text-white rounded-tr-sm border border-slate-600 border-l-4 border-l-orange-500' 
                     }`}>
-                      <p className="text-[13px] md:text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                      
+                      {/* ========================================================== */}
+                      {/* [FIX]: Render HTML pakai dangerouslySetInnerHTML biar BOLD! */}
+                      {/* ========================================================== */}
+                      <p 
+                        className="text-[13px] md:text-sm leading-relaxed" 
+                        dangerouslySetInnerHTML={{ __html: formatChatMessage(msg.text) }} 
+                      />
                       
                       <div className={`text-[9px] mt-2 flex items-center justify-end gap-1.5 ${msg.sender === 'customer' ? 'text-slate-400' : 'text-white/70'}`}>
                         <span className="uppercase font-black tracking-widest opacity-80">
