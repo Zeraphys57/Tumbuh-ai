@@ -10,6 +10,9 @@ interface Lead {
   is_bot_active: boolean;
   created_at: string;
   platform?: string;
+  // [NEW]: State lokal untuk Radar Pemantau
+  live_preview?: string;
+  has_new_activity?: boolean; 
 }
 
 interface ChatMessage {
@@ -23,30 +26,20 @@ interface ChatMessage {
 const MESSAGES_PER_PAGE = 50;
 
 // ==========================================================
-// [FIX & SECURE]: Mengubah Markdown (*teks*) menjadi HTML (<b>teks</b>)
-// DENGAN SANITASI XSS (Thanks to Pak Claude!)
+// Fungsi Helper untuk Mengubah Markdown menjadi HTML (Aman XSS)
 // ==========================================================
 const formatChatMessage = (text: string) => {
   if (!text) return "";
-  
-  // 1. ESCAPE HTML DULU (WAJIB & KRUSIAL!)
-  // Ini akan mengubah <script> menjadi &lt;script&gt; (teks mati, tidak bisa dieksekusi)
-  let safe = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  // 2. Baru parsing markdown setelah aman
-  // Convert **text** atau *text* menjadi <strong>text</strong>
+  let safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   safe = safe.replace(/(?:\*\*|\*)(.*?)(?:\*\*|\*)/g, '<strong>$1</strong>');
-  
-  // Convert _text_ menjadi <em>text</em> (italic)
   safe = safe.replace(/_(.*?)_/g, '<em>$1</em>');
-  
-  // Convert enter (\n) menjadi <br />
   safe = safe.replace(/\n/g, '<br />');
-
   return safe;
+};
+
+const safeSlice = (text: string, length: number) => {
+  if (!text) return "";
+  return Array.from(text).slice(0, length).join("");
 };
 
 export default function LiveChat() {
@@ -55,7 +48,6 @@ export default function LiveChat() {
   const [chatLogs, setChatLogs] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   
-  const [clientId, setClientId] = useState("");
   const [clientSlug, setClientSlug] = useState("");
 
   const [hasMore, setHasMore] = useState(true);
@@ -65,7 +57,6 @@ export default function LiveChat() {
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const activePhoneRef = useRef<string | null>(null);
-  
   const scrollThrottleRef = useRef<NodeJS.Timeout | null>(null);
 
   const supabase = useMemo(() => createBrowserClient(
@@ -75,6 +66,11 @@ export default function LiveChat() {
 
   useEffect(() => {
     activePhoneRef.current = activePhone;
+    
+    // Matikan lampu notifikasi saat chat dibuka
+    if (activePhone) {
+      setLeads(prev => prev.map(l => l.customer_phone === activePhone ? { ...l, has_new_activity: false } : l));
+    }
   }, [activePhone]);
 
   const scrollToBottom = () => {
@@ -100,8 +96,6 @@ export default function LiveChat() {
 
       const cId = clientData?.id || user.id; 
       const slug = clientData?.slug || "";
-
-      setClientId(cId);
       setClientSlug(slug);
 
       const { data: leadsData } = await supabase
@@ -121,7 +115,9 @@ export default function LiveChat() {
             'postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'chat_logs', filter: `client_id=eq.${slug}` },
             (payload) => {
-              if (payload.new.customer_phone === activePhoneRef.current) {
+              const isCurrentlyOpen = payload.new.customer_phone === activePhoneRef.current;
+
+              if (isCurrentlyOpen) {
                 setChatLogs((prev) => {
                   if (prev.some(msg => msg.id === payload.new.id)) return prev;
                   return [...prev, payload.new];
@@ -129,12 +125,41 @@ export default function LiveChat() {
                 scrollToBottom(); 
               }
               
+              // ==========================================================
+              // [DI SINI TEMPAT YANG BENAR]: Pantau aktifitas bot & lempar ke atas
+              // ==========================================================
               setLeads((prev) => {
                 const targetIndex = prev.findIndex(l => l.customer_phone === payload.new.customer_phone);
-                if (targetIndex > 0) { 
+                
+                if (targetIndex > -1) { 
+                  const leadToUpdate = prev[targetIndex];
+
+                  const rawResponse = payload.new.response || "";
+                  const rawMessage = payload.new.message || "";
+                  const isAi = payload.new.replied_by !== 'admin';
+
+                  let snippet = "";
+                  if (rawResponse.trim() !== "") {
+                    snippet = `${isAi ? '🤖' : '👨‍💻'} ${safeSlice(rawResponse, 35)}...`;
+                  } else if (rawMessage.trim() !== "") {
+                    snippet = `👤 ${safeSlice(rawMessage, 35)}...`;
+                  }
+
+                  const updatedLead = {
+                    ...leadToUpdate,
+                    live_preview: snippet || leadToUpdate.live_preview,
+                    has_new_activity: !isCurrentlyOpen 
+                  };
+
                   const newLeads = [...prev];
-                  const [bumpedLead] = newLeads.splice(targetIndex, 1);
-                  return [bumpedLead, ...newLeads];
+                  
+                  if (targetIndex === 0) {
+                    newLeads[0] = updatedLead; 
+                    return newLeads;
+                  } else {
+                    newLeads.splice(targetIndex, 1); 
+                    return [updatedLead, ...newLeads]; 
+                  }
                 }
                 return prev;
               });
@@ -145,9 +170,9 @@ export default function LiveChat() {
             { event: '*', schema: 'public', table: 'leads', filter: `client_id=eq.${cId}` },
             (payload) => {
               if (payload.eventType === 'INSERT') {
-                setLeads((prev) => [payload.new as Lead, ...prev]);
+                setLeads((prev) => [{ ...(payload.new as Lead), has_new_activity: true }, ...prev]);
               } else if (payload.eventType === 'UPDATE') {
-                setLeads((prev) => prev.map(lead => lead.id === payload.new.id ? payload.new as Lead : lead));
+                setLeads((prev) => prev.map(lead => lead.id === payload.new.id ? { ...lead, ...payload.new } : lead));
               }
             }
           )
@@ -252,7 +277,7 @@ export default function LiveChat() {
     await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
   };
 
- const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !activeLead || !clientSlug) return;
 
@@ -284,11 +309,13 @@ export default function LiveChat() {
     setChatLogs(prev => [...prev, optimisticMessage]);
     scrollToBottom();
 
+    // Bump saat admin kirim pesan manual
     setLeads((prev) => {
       const targetIndex = prev.findIndex(l => l.customer_phone === activePhone);
-      if (targetIndex > 0) {
+      if (targetIndex > -1) {
         const newLeads = [...prev];
         const [bumpedLead] = newLeads.splice(targetIndex, 1);
+        bumpedLead.live_preview = `👨‍💻 ${safeSlice(sentText, 35)}...`; 
         return [bumpedLead, ...newLeads];
       }
       return prev;
@@ -304,7 +331,6 @@ export default function LiveChat() {
     }).select().single();
 
     if (dbError) {
-      console.error("❌ Gagal simpan chat ke DB:", dbError);
       setChatLogs(prev => prev.filter(msg => msg.id !== tempId));
       alert("❌ Gagal mengirim pesan ke sistem. Silakan coba lagi.");
       return; 
@@ -329,9 +355,18 @@ export default function LiveChat() {
       
       {/* KIRI: Daftar Kontak / Leads */}
       <div className="w-1/3 border-r border-white/10 flex flex-col bg-slate-900/50 relative z-20 shadow-xl shadow-black/20">
-        <div className="p-6 border-b border-white/10 bg-slate-900/80 backdrop-blur-md z-10">
-          <h2 className="text-xl font-black italic tracking-tight text-white drop-shadow-md">INBOX LEAD</h2>
-          <p className="text-[10px] uppercase tracking-widest text-blue-400 mt-1 font-bold">Live Monitor</p>
+        <div className="p-6 border-b border-white/10 bg-slate-900/80 backdrop-blur-md z-10 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-black italic tracking-tight text-white drop-shadow-md">INBOX LEAD</h2>
+            <p className="text-[10px] uppercase tracking-widest text-blue-400 mt-1 font-bold">Live Monitor</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <span className="text-[9px] uppercase font-black text-emerald-500 tracking-widest">RADAR ON</span>
+          </div>
         </div>
         
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar relative">
@@ -346,18 +381,52 @@ export default function LiveChat() {
             <div 
               key={lead.id} 
               onClick={() => setActivePhone(lead.customer_phone)}
-              className={`p-4 border-b border-white/5 cursor-pointer transition-all duration-200 ${activePhone === lead.customer_phone ? 'bg-blue-600/15 border-l-[6px] border-l-blue-500 shadow-inner' : 'border-l-[6px] border-l-transparent hover:bg-slate-800/50'}`}
+              className={`p-4 border-b border-white/5 cursor-pointer transition-all duration-300 relative overflow-hidden ${
+                activePhone === lead.customer_phone 
+                  ? 'bg-blue-600/15 border-l-[6px] border-l-blue-500 shadow-inner' 
+                  : lead.has_new_activity
+                  ? 'bg-slate-800/80 border-l-[6px] border-l-blue-400 hover:bg-slate-800'
+                  : 'border-l-[6px] border-l-transparent hover:bg-slate-800/50'
+              }`}
             >
+              {lead.has_new_activity && activePhone !== lead.customer_phone && (
+                 <div className="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-blue-500/10 to-transparent skew-x-12 -translate-x-full animate-[shimmer_2s_infinite]"></div>
+              )}
+
               <div className="flex justify-between items-start mb-1">
-                <h3 className={`font-bold text-sm truncate ${activePhone === lead.customer_phone ? 'text-white' : 'text-slate-300'}`}>
+                <h3 className={`font-bold text-sm truncate flex items-center gap-1.5 ${
+                  activePhone === lead.customer_phone ? 'text-white' : lead.has_new_activity ? 'text-blue-100' : 'text-slate-300'
+                }`}>
                   {lead.platform === 'instagram' ? '🟪 ' : '🟩 '}
                   {lead.customer_name}
                 </h3>
+                
+                {lead.has_new_activity && activePhone !== lead.customer_phone && (
+                  <span className="relative flex h-2.5 w-2.5 mt-1 mr-1">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-slate-500 truncate font-mono tracking-wider">{lead.customer_phone}</p>
-              <div className="mt-2 flex">
-                <span className={`text-[9px] px-2 py-0.5 rounded-md uppercase tracking-widest font-black shadow-sm ${lead.is_bot_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'}`}>
-                  {lead.is_bot_active ? '🤖 AI Active' : '👨‍💻 Human Mode'}
+
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-slate-500 truncate font-mono tracking-wider">{lead.customer_phone}</p>
+              </div>
+
+              {lead.live_preview && (
+                 <p className={`text-[11px] mt-2 truncate ${lead.has_new_activity ? 'text-blue-300/90 font-medium' : 'text-slate-500 italic'}`}>
+                   {lead.live_preview}
+                 </p>
+              )}
+
+              <div className="mt-2.5 flex">
+                <span className={`text-[8px] px-2 py-0.5 rounded-md uppercase tracking-widest font-black shadow-sm flex items-center gap-1 ${lead.is_bot_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'}`}>
+                  {lead.is_bot_active ? (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      AI Active
+                    </>
+                  ) : '👨‍💻 Human Mode'}
                 </span>
               </div>
             </div>
@@ -436,15 +505,10 @@ export default function LiveChat() {
                         ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-tr-sm shadow-[0_0_20px_rgba(37,99,235,0.15)] border border-blue-500/30'
                         : 'bg-slate-700/80 text-white rounded-tr-sm border border-slate-600 border-l-4 border-l-orange-500' 
                     }`}>
-                      
-                      {/* ========================================================== */}
-                      {/* [FIX]: Render HTML pakai dangerouslySetInnerHTML biar BOLD! */}
-                      {/* ========================================================== */}
                       <p 
                         className="text-[13px] md:text-sm leading-relaxed" 
                         dangerouslySetInnerHTML={{ __html: formatChatMessage(msg.text) }} 
                       />
-                      
                       <div className={`text-[9px] mt-2 flex items-center justify-end gap-1.5 ${msg.sender === 'customer' ? 'text-slate-400' : 'text-white/70'}`}>
                         <span className="uppercase font-black tracking-widest opacity-80">
                           {msg.sender === 'ai' ? '🤖 AI Node' : msg.sender === 'admin' ? '👨‍💻 Human' : ''}
