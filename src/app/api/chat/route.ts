@@ -296,7 +296,7 @@ ${ragContextText}`;
 }
 
 // ============================================================================
-// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (TETAP SAMA SEPERTI SEBELUMNYA) 🌟
+// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (REVISI ANTI-HALUSINASI & SNIPER SEARCH) 🌟
 // ============================================================================
 async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[], platformName: string) {
   try {
@@ -305,7 +305,8 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       properties: {
         name: { type: SchemaType.STRING, description: "Nama pelanggan jika disebutkan, isi 'null' jika tidak ada" },
         phone: { type: SchemaType.STRING, description: "Nomor HP / WhatsApp pelanggan jika disebutkan, isi 'null' jika tidak ada" },
-        needs: { type: SchemaType.STRING, description: "Kebutuhan utama/keluhan, isi 'null' jika tidak ada" },
+        // [FIX 1]: Paksa AI merangkum jadi 2-4 kata kunci agar mudah di-search
+        needs: { type: SchemaType.STRING, description: "Inti kebutuhan/keluhan DARI PELANGGAN. MAKSIMAL 2-4 KATA KUNCI (Contoh: 'Tanya Harga', 'Komplain Pengiriman'). DILARANG KERAS mengutip balasan/template dari Bot. Isi 'null' jika tidak ada." },
         total_people: { type: SchemaType.STRING, description: "Jumlah orang/kuantitas, isi 'null' jika tidak ada" },
         booking_date: { type: SchemaType.STRING, description: "Tanggal reservasi, isi 'null' jika tidak ada" },
         booking_time: { type: SchemaType.STRING, description: "Jam reservasi, isi 'null' jika tidak ada" },
@@ -320,7 +321,17 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
     const contextForExtraction = history.map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");    
     const fullChatLog = contextForExtraction + `\nUser: ${userMessage}\nBot: ${botReply}`;
 
-    const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini. Jika data (seperti nomor telepon atau nama) sudah pernah disebutkan di chat sebelumnya, JANGAN DIHAPUS (wajib ditulis ulang). \n\nChat Historis:\n${fullChatLog}`;
+    // [FIX 2]: Tambahkan Aturan Besi di Prompt Ekstraktor
+    const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini.
+ATURAN MUTLAK:
+1. Kolom 'needs' HANYA boleh diisi berdasarkan ucapan 'User'.
+2. JANGAN PERNAH memasukkan teks template dari 'Bot' (seperti "Silakan tinggalkan Nama dan Nomor WhatsApp") ke dalam 'needs'.
+3. Buat 'needs' menjadi kata kunci singkat agar mudah dicari di database.
+4. Jika data (telepon/nama/needs sebelumnya) sudah ada di chat, JANGAN DIHAPUS (pertahankan/gabungkan dengan rapi).
+
+Chat Historis:
+${fullChatLog}`;
+
     const extractionResult = await extractorModel.generateContent(checkPrompt);
     
     const rawText = extractionResult.response.text().trim();
@@ -352,7 +363,8 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       }
 
       const finalName = (extractedData.name && extractedData.name !== "null") ? extractedData.name : (oldLead?.customer_name || "Web User");
-      const finalNeeds = (extractedData.needs && extractedData.needs !== "null") ? extractedData.needs : (oldLead?.customer_needs || userMessage);
+      // [FIX 3]: Jangan sembarangan masukin userMessage mentah ke database
+      const finalNeeds = (extractedData.needs && extractedData.needs !== "null") ? extractedData.needs : (oldLead?.customer_needs || "-");
       const finalPeople = (extractedData.total_people && extractedData.total_people !== "null") ? extractedData.total_people : (oldLead?.total_people || null);
       const finalDate = (extractedData.booking_date && extractedData.booking_date !== "null") ? extractedData.booking_date : (oldLead?.booking_date || "-");
       const finalTime = (extractedData.booking_time && extractedData.booking_time !== "null") ? extractedData.booking_time : (oldLead?.booking_time || "-");
@@ -370,10 +382,15 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
         platform: platformName.toLowerCase()
       };
 
+      // ... kode payload sebelumnya ...
+
+      // [FIX 4]: Kembalikan Error Handling Spesifik Supabase untuk Debugging
       if (oldLead) {
-         await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
+         const { error: updateErr } = await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
+         if (updateErr) console.error("❌ Update DB Error:", updateErr.message);
       } else {
-         await supabase.from("leads").insert(leadPayload);
+         const { error: insertErr } = await supabase.from("leads").insert(leadPayload);
+         if (insertErr) console.error("❌ Insert DB Error:", insertErr.message);
       }
     }
   } catch (extractError) {
