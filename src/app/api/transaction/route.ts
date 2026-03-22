@@ -31,9 +31,15 @@ export async function POST(req: Request) {
 
     const actualPrice = isAnnual ? plan.annual : plan.monthly;
 
-    const serverKey = process.env.MIDTRANS_SERVER_KEY || "";
+    const serverKey = (process.env.MIDTRANS_SERVER_KEY || "").trim();
     const isProduction = process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true";
     
+    console.log("=== DEBUG MIDTRANS ===");
+    console.log("Mode Production?:", isProduction);
+    console.log("Panjang Server Key:", serverKey.length);
+    console.log("Potongan Server Key:", serverKey.substring(0, 15) + "...");
+    console.log("======================");
+
     const apiUrl = isProduction 
       ? "https://app.midtrans.com/snap/v1/transactions"
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";

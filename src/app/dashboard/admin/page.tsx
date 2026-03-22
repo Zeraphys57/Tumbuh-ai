@@ -95,6 +95,43 @@ export default function SuperAdminDashboard() {
     window.location.href = "/login";
   };
 
+  const impersonateClient = async (clientEmail: string, clientName: string) => {
+    // Karena kita tidak punya password asli klien, dan tidak mungkin memaksa OTP ke email mereka lagi,
+    // Kita harus membuat "Jalur Belakang" khusus Super Admin untuk membuat sesi login klien.
+    
+    // Namun, Supabase di client-side (browser) SANGAT KETAT dan tidak mengizinkan bypass password.
+    // Solusi terbaik dan teraman untuk Next.js App Router:
+    // Kita panggil API yang akan men-generate Magic Link, lalu kita redirect Bos ke link tersebut.
+
+    setConfirmModal({
+      isOpen: true,
+      title: "Masuk Sebagai Klien",
+      message: `Anda akan login ke dalam dashboard milik ${clientName} (${clientEmail}). Aksi ini akan melogout Anda dari Super Admin. Lanjutkan?`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const res = await fetch("/api/admin/impersonate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: clientEmail }),
+          });
+          
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+          
+          logAdminAction("IMPERSONATE", clientName, `Super Admin masuk ke akun klien`);
+          
+          // Redirect ke Magic Link yang dihasilkan API
+          if (data.url) {
+            window.location.href = data.url;
+          }
+        } catch (error: any) {
+          alert("Gagal Impersonate: " + error.message);
+        }
+      }
+    });
+  };
+
   const changeClientPlan = (clientId: string, currentPlan: string, clientName: string, newPlan: string) => {
     if (currentPlan === newPlan) return;
     
@@ -238,11 +275,25 @@ export default function SuperAdminDashboard() {
   const executeDelete = async () => {
     if (!clientToDelete || challengeInput !== `MUSNAHKAN ${clientToDelete.name}`) return;
     setIsDeleting(true);
+    
     try {
-      const { error } = await supabase.from("clients").delete().eq("id", clientToDelete.id);
-      if (error) throw error;
+      // 🚨 PANGGIL API JALUR BELAKANG (Biar kamar brankasnya juga dihapus)
+      const res = await fetch("/api/admin/delete-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: clientToDelete.id }),
+      });
+
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || "Gagal menghapus klien.");
+      }
+
+      // Update UI jika berhasil dihapus dari database
       setAllStats(prev => prev.filter(stat => stat.id !== clientToDelete.id));
       logAdminAction("DELETE_CLIENT", clientToDelete.name, "MENGHAPUS PERMANEN KLIEN DARI DATABASE ☢️");
+      
       setIsModalOpen(false);
       setClientToDelete(null);
     } catch (error: any) {
@@ -726,12 +777,25 @@ export default function SuperAdminDashboard() {
                       <td className="px-4 py-5 md:px-6 md:py-6 text-right font-mono font-black text-blue-600 text-lg md:text-xl">{stat.totalTokens.toLocaleString()}</td>
                       
                       <td className="px-4 py-5 md:px-6 md:py-6 text-right">
-                         <div className="flex flex-col items-end gap-2.5 min-w-[120px]">
-                            <button onClick={() => downloadClientBilling(stat)} className="bg-slate-900 text-white text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg hover:bg-blue-600 transition-colors shadow-md w-full">Cetak Invoice</button>
-                            <button onClick={() => openDeleteModal(stat.id, stat.name)} className="bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg transition-colors shadow-sm w-full flex justify-center items-center gap-1.5">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Hapus
-                            </button>
-                         </div>
+                        <div className="flex flex-col items-end gap-2.5 min-w-[120px]">
+                          
+                          {/* 👑 TOMBOL MAGIC DOOR (IMPERSONATE) */}
+                          <button 
+                            onClick={() => impersonateClient(stat.id, stat.name)} 
+                            className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[9px] md:text-[10px] font-black uppercase tracking-widest px-3 md:px-4 py-2.5 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all shadow-md shadow-indigo-500/30 w-full flex justify-center items-center gap-1.5 active:scale-95"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            Login Klien
+                          </button>
+
+                          <button onClick={() => downloadClientBilling(stat)} className="bg-slate-900 text-white text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg hover:bg-blue-600 transition-colors shadow-md w-full">
+                            Cetak Invoice
+                          </button>
+                          
+                          <button onClick={() => openDeleteModal(stat.id, stat.name)} className="bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 text-[9px] md:text-[10px] font-bold px-3 md:px-4 py-2.5 rounded-lg transition-colors shadow-sm w-full flex justify-center items-center gap-1.5">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Hapus
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

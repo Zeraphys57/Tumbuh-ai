@@ -100,15 +100,16 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex justify-between items-end ml-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Password</label>
-                <a 
-                  href="https://wa.me/6281351958200?text=Halo%20Tumbuh%20AI,%20saya%20butuh%20bantuan%20karena%20lupa%20password%20dashboard%20klien%20saya." 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-[10px] font-black text-blue-600 hover:text-blue-800 transition-colors uppercase tracking-widest italic"
+                
+                {/* GANTI DARI <a> KE <Link> UNTUK RESET PASSWORD MANDIRI */}
+                <Link 
+                  href="/forgot-password" 
+                  className="text-[10px] font-black text-blue-600 hover:text-blue-800 transition-colors uppercase tracking-widest italic cursor-pointer"
                 >
                   Lupa?
-                </a>
+                </Link>
               </div>
+              
               <input
                 type="password"
                 required
