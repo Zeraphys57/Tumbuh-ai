@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 export async function POST(req: Request) {
   try {
   const { clientId } = await req.json();
-  
+
   const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({ message: "Klien MUSNAH TOTAL dari Bumi dan Langit!" }, { status: 200 });
+  return NextResponse.json({ message: "Klien MUSNAH TOTAL" }, { status: 200 });
 
 } catch (error: any) {
   return NextResponse.json({ error: "Sistem Error: " + error.message }, { status: 500 });
