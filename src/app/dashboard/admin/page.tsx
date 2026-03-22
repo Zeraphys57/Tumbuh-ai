@@ -95,41 +95,26 @@ export default function SuperAdminDashboard() {
     window.location.href = "/login";
   };
 
-  const impersonateClient = async (clientEmail: string, clientName: string) => {
-    // Karena kita tidak punya password asli klien, dan tidak mungkin memaksa OTP ke email mereka lagi,
-    // Kita harus membuat "Jalur Belakang" khusus Super Admin untuk membuat sesi login klien.
-    
-    // Namun, Supabase di client-side (browser) SANGAT KETAT dan tidak mengizinkan bypass password.
-    // Solusi terbaik dan teraman untuk Next.js App Router:
-    // Kita panggil API yang akan men-generate Magic Link, lalu kita redirect Bos ke link tersebut.
+    const impersonateClient = async (id: string, name: string) => {
+    // id: ID unik klien, name: Nama klien (buat konfirmasi)
+    if (!confirm(`Masuk ke dashboard ${name}?`)) return;
 
-    setConfirmModal({
-      isOpen: true,
-      title: "Masuk Sebagai Klien",
-      message: `Anda akan login ke dalam dashboard milik ${clientName} (${clientEmail}). Aksi ini akan melogout Anda dari Super Admin. Lanjutkan?`,
-      onConfirm: async () => {
-        setConfirmModal(null);
-        try {
-          const res = await fetch("/api/admin/impersonate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: clientEmail }),
-          });
-          
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error);
-          
-          logAdminAction("IMPERSONATE", clientName, `Super Admin masuk ke akun klien`);
-          
-          // Redirect ke Magic Link yang dihasilkan API
-          if (data.url) {
-            window.location.href = data.url;
-          }
-        } catch (error: any) {
-          alert("Gagal Impersonate: " + error.message);
-        }
+    try {
+      const res = await fetch("/dashboard/admin/impersonate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: id }), // Kita kirim paket bernama 'clientId' isinya 'id'
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, "_blank"); // Buka tab baru
+      } else {
+        alert("Error: " + data.error);
       }
-    });
+    } catch (err) {
+      alert("Koneksi Error!");
+    }
   };
 
   const changeClientPlan = (clientId: string, currentPlan: string, clientName: string, newPlan: string) => {
@@ -278,7 +263,7 @@ export default function SuperAdminDashboard() {
     
     try {
       // 🚨 PANGGIL API JALUR BELAKANG (Biar kamar brankasnya juga dihapus)
-      const res = await fetch("/api/admin/delete-client", {
+      const res = await fetch("/dashboard/admin/delete-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId: clientToDelete.id }),

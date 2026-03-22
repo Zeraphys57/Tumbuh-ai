@@ -30,12 +30,16 @@ export async function POST(req: Request) {
     }
 
     const clientEmail = userData.user.email;
+    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
     // 3. GENERATE MAGIC LINK (Bypass Password)
     // Ini menyuruh Supabase membuatkan link login sekali pakai khusus untuk email ini
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: clientEmail,
+      options: { 
+            redirectTo: `${SITE_URL}/dashboard/leads` 
+        }
     });
 
     if (linkError) {
