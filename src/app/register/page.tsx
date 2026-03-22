@@ -236,7 +236,7 @@ export default function SuperAdminRegister() {
         <div className="mt-8 pt-8 border-t border-slate-100/60 text-center">
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
             Sudah memiliki node bisnis? <br/>
-            <Link href="/dashboard/admin" className="text-blue-600 hover:text-slate-900 transition-colors mt-2 inline-block italic">
+            <Link href="/dashboard/admin/super-dashboard" className="text-blue-600 hover:text-slate-900 transition-colors mt-2 inline-block italic">
               &larr; Back
             </Link>
           </p>

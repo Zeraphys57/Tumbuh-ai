@@ -30,6 +30,11 @@ export async function GET(request: Request) {
 // FUNGSI POST: ENGINE UTAMA INSTAGRAM
 // ============================================================================
 export async function POST(request: Request) {
+  // [NEW 🟢]: Variabel CCTV Telemetry
+  let aiStartTime = 0;
+  let dbClientId: string | null = null;
+  const AI_MODEL_MAIN = "gemini-2.5-flash";
+
   try {
     const body = await request.json();
 
@@ -50,7 +55,6 @@ export async function POST(request: Request) {
       // --------------------------------------------------------------------
       // 1. CARI KLIEN DI DATABASE
       // --------------------------------------------------------------------
-      // [FIX 1]: Tarik juga is_active dan monthly_limit untuk Gembok Bisnis
       const { data: client } = await supabase
         .from("clients")
         .select("id, slug, business_name, instagram_access_token, system_prompt, features, is_active, monthly_limit")
@@ -62,8 +66,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true }, { status: 200 });
       }
 
+      dbClientId = client.id; // [NEW 🟢]: Simpan untuk jaga-jaga kalau error
+
       // ====================================================================
-      // [FIX 2 DARI PAK CLAUDE]: GEMBOK BISNIS (Kill Switch & Rate Limit)
+      // GEMBOK BISNIS (Kill Switch & Rate Limit)
       // ====================================================================
       if (client.is_active === false) {
         console.warn(`🛑 Klien ${client.slug} sedang di-suspend/nonaktif.`);
@@ -85,7 +91,6 @@ export async function POST(request: Request) {
       // --------------------------------------------------------------------
       // 2. CEK SAKLAR AI & DATA LEAD
       // --------------------------------------------------------------------
-      // [FIX 3]: Tarik 'full_chat' untuk keperluan Append di Extractor nanti
       let { data: lead } = await supabase
         .from("leads")
         .select("id, is_bot_active, created_at, full_chat") 
@@ -112,7 +117,11 @@ export async function POST(request: Request) {
       // 3. PANGGIL GEMINI ENGINE (Chat & Ekstraksi Lead)
       // --------------------------------------------------------------------
       console.log("🤖 Gemini sedang berpikir untuk membalas IG...");
+      
+      aiStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch AI Utama
       const aiResult = await runGeminiAgentIG(client, messageText, customerIgId);
+      const aiEndTime = performance.now(); // [NEW 🟢]: Hentikan Stopwatch AI Utama
+      const latencyMs = Math.round(aiEndTime - aiStartTime); // [NEW 🟢]
 
       // --- LAPIS 3: TRIGGER HUMAN HANDOFF ---
       let finalResponseText = aiResult.text;
@@ -141,11 +150,15 @@ export async function POST(request: Request) {
         platform: "instagram"
       });
 
+      // [NEW 🟢]: LOG TELEMETRY LENGKAP KE USAGE_LOGS
       const saveUsageTask = supabase.from("usage_logs").insert({
         client_id: client.id,
+        model_used: AI_MODEL_MAIN,
         tokens_input: aiResult.inputTokens,
         tokens_output: aiResult.outputTokens,
-        total_tokens: aiResult.totalTokens
+        total_tokens: aiResult.totalTokens,
+        latency_ms: latencyMs,
+        status: aiResult.totalTokens > 0 ? 'success' : 'error' 
       });
 
       // Jalankan tugas update Leads di background
@@ -158,6 +171,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error("❌ Fatal Error IG Webhook AI:", error);
+
+    // [NEW 🟢]: REKAM KEGAGALAN FATAL KE TELEMETRY
+    if (dbClientId) {
+      const errorEndTime = performance.now();
+      const failLatency = aiStartTime > 0 ? Math.round(errorEndTime - aiStartTime) : 0;
+      await supabase.from("usage_logs").insert({
+        client_id: dbClientId,
+        model_used: AI_MODEL_MAIN,
+        latency_ms: failLatency,
+        status: 'error'
+      });
+    }
+
     return NextResponse.json({ error: "Server Error" }, { status: 500 });
   }
 }
@@ -252,8 +278,9 @@ ${addonText}`;
 // ============================================================================
 async function runLeadExtractionBackgroundIG(client: any, existingLead: any, customerIgId: string, userMsg: string, aiReply: string, history: any[]) {
   try {
+    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; // [NEW 🟢]
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-lite", 
+      model: EXTRACTOR_MODEL, 
       generationConfig: { responseMimeType: "application/json" } 
     });
 
@@ -276,7 +303,24 @@ ATURAN PENTING:
   "booking_time": "jam atau null"
 }`;
 
+    const extractStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch Extractor
     const extractionResult = await extractorModel.generateContent(checkPrompt);
+    const extractEndTime = performance.now(); // [NEW 🟢]: Selesai Stopwatch
+
+    // [NEW 🟢]: LOG TELEMETRY EKSTRAKTOR
+    const extractUsage = extractionResult.response.usageMetadata;
+    if (extractUsage) {
+       await supabase.from("usage_logs").insert({
+         client_id: client.id,
+         model_used: EXTRACTOR_MODEL,
+         tokens_input: extractUsage.promptTokenCount,
+         tokens_output: extractUsage.candidatesTokenCount,
+         total_tokens: extractUsage.totalTokenCount,
+         latency_ms: Math.round(extractEndTime - extractStartTime),
+         status: 'success'
+       });
+    }
+
     const cleanJson = extractionResult.response.text().replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
 
@@ -285,13 +329,10 @@ ATURAN PENTING:
        finalNeeds = `[WA Diberikan: ${extractedData.phone}] ` + finalNeeds;
     }
 
-    // ====================================================================
-    // [FIX 4 DARI PAK CLAUDE]: APPEND FULL CHAT (Bukan Overwrite)
-    // ====================================================================
     const newTurnLog = `User: ${userMsg}\nBot: ${aiReply}`;
     const finalChatToSave = existingLead?.full_chat 
-       ? existingLead.full_chat + "\n\n" + newTurnLog 
-       : newTurnLog;
+        ? existingLead.full_chat + "\n\n" + newTurnLog 
+        : newTurnLog;
 
     if (existingLead) {
       const updatePayload: any = { full_chat: finalChatToSave };
@@ -314,12 +355,19 @@ ATURAN PENTING:
         booking_date: extractedData.booking_date && extractedData.booking_date !== "null" ? extractedData.booking_date : "-", 
         booking_time: extractedData.booking_time && extractedData.booking_time !== "null" ? extractedData.booking_time : "-",
         platform: "instagram",
-        full_chat: finalChatToSave, // Gunakan string append yang sama
+        full_chat: finalChatToSave, 
         is_bot_active: true
       });
       console.log("✨ Background IG: Lead Baru Ditambahkan!");
     }
   } catch (e) {
     console.error("⚠️ Background Extraction Error IG:", e);
+    // [NEW 🟢]: REKAM KEGAGALAN EKSTRAKTOR KE TELEMETRY
+    await supabase.from("usage_logs").insert({
+         client_id: client.id,
+         model_used: "gemini-2.5-flash-lite",
+         latency_ms: 0,
+         status: 'error'
+    });
   }
 }

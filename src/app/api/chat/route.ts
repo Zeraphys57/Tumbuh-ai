@@ -24,6 +24,11 @@ setInterval(() => {
 }, 60 * 1000);
 
 export async function POST(req: Request) {
+  // [NEW 🟢]: Variabel global untuk Telemetry CCTV
+  let aiStartTime = 0;
+  let dbClientId: string | null = null;
+  const AI_MODEL_MAIN = "gemini-2.5-flash"; 
+
   try {
     const body = await req.json();
     
@@ -88,6 +93,7 @@ export async function POST(req: Request) {
     }
 
     const clientData = client; 
+    dbClientId = clientData.id; // [NEW 🟢]: Simpan ID untuk log jika nanti ada error
 
     // --- LOGIKA ADDON LAMA (STATIC) ---
     let addonText = "";
@@ -190,7 +196,8 @@ ${ragContextText}`;
     const finalTools = activeToolNames;
     const geminiTools = getGeminiToolsConfig(finalTools);
 
-    const modelOptions: any = { model: "gemini-2.5-flash", systemInstruction: masterBasePrompt };
+    // [NEW 🟢]: Pass modelName dynamically
+    const modelOptions: any = { model: AI_MODEL_MAIN, systemInstruction: masterBasePrompt };
     if (geminiTools) {
       modelOptions.tools = geminiTools;
     }
@@ -204,7 +211,6 @@ ${ragContextText}`;
     let safeHistory: any[] = [];
 
     if (history && Array.isArray(history)) {
-      // 1. Bersihkan elemen kosong & standarisasi role ('user' atau 'model')
       const rawCleaned = history
         .filter((msg: any) => msg.content && msg.content.trim() !== "") 
         .map((msg: any) => ({ 
@@ -212,29 +218,28 @@ ${ragContextText}`;
            parts: [{ text: msg.content }] 
         }));
 
-      // 2. Gabungkan role yang berurutan (Gemini WAJIB User -> Model -> User)
       for (const msg of rawCleaned) {
         if (safeHistory.length === 0) {
           safeHistory.push(msg);
         } else {
           const lastMsg = safeHistory[safeHistory.length - 1];
-          // Jika role-nya sama dengan pesan sebelumnya (tabrakan)
           if (lastMsg.role === msg.role) {
-            lastMsg.parts[0].text += "\n\n" + msg.parts[0].text; // Gabungkan teksnya
+            lastMsg.parts[0].text += "\n\n" + msg.parts[0].text; 
           } else {
-            safeHistory.push(msg); // Jika beda, masukkan secara normal
+            safeHistory.push(msg); 
           }
         }
       }
-
-      // 3. Pangkas history agar tidak kepanjangan
       safeHistory = safeHistory.slice(-MAX_HISTORY);
     }
 
     const chat = model.startChat({ history: safeHistory });
 
-    // [FIX 🔴]: MENGIRIM PESAN USER SECARA MURNI, TANPA EMBEL-EMBEL LABEL
     console.log(`[OMNICHANNEL ROUTER] Meneruskan pesan ke Gemini dengan mode platform: ${platformName}`);
+    
+    // [NEW 🟢]: MULAI STOPWATCH AI UTAMA
+    aiStartTime = performance.now(); 
+    
     const result = await chat.sendMessage(message);
     let response = await result.response;
     let reply: string = "";
@@ -268,29 +273,48 @@ ${ragContextText}`;
       reply = response.text();
     }
 
+    // [NEW 🟢]: MATIKAN STOPWATCH & HITUNG LATENCY
+    const aiEndTime = performance.now();
+    const latencyMs = Math.round(aiEndTime - aiStartTime);
+
     let isHandoff = false;
     if (reply.includes("[OPER_MANUSIA]")) {
       reply = "Mohon maaf atas ketidaknyamanannya 🙏.\n\nPertanyaan/keluhan ini membutuhkan bantuan lebih lanjut. Silakan tinggalkan Nama dan Nomor WhatsApp Anda, tim CS manusia kami akan segera menghubungi Anda kembali.";
       isHandoff = true; 
     }
 
-    // 5. EKSTRAKSI LEAD & USAGE LOG
+    // [NEW 🟢]: 5. EKSTRAKSI LEAD & USAGE LOG (DENGAN DATA LENGKAP)
     const usage = response.usageMetadata;
     const logPromise = usage ? supabase.from("usage_logs").insert({
       client_id: clientData.id,
+      model_used: AI_MODEL_MAIN,       // Log nama model asli
       tokens_input: usage.promptTokenCount,
       tokens_output: usage.candidatesTokenCount,
-      total_tokens: usage.totalTokenCount
+      total_tokens: usage.totalTokenCount,
+      latency_ms: latencyMs,           // Log kecepatan response
+      status: 'success'                // Log status sukses
     }) : Promise.resolve();
 
     const extractPromise = runWebLeadExtraction(clientData.id, message, reply, safeHistory, platformName);
 
-    await Promise.all([extractPromise, logPromise]).catch(err => console.error("Web Extractor Error:", err));
+    await Promise.all([extractPromise, logPromise]).catch(err => console.error("Web Extractor/Telemetry Error:", err));
 
     return NextResponse.json({ reply, isHandoff });
 
   } catch (error: any) {
     console.error("Chat Error:", error.message);
+    
+    // [NEW 🟢]: TANGKAP ERROR AI DAN CATAT KE TELEMETRY
+    if (dbClientId && aiStartTime > 0) {
+      const errorEndTime = performance.now();
+      await supabase.from("usage_logs").insert({
+        client_id: dbClientId,
+        model_used: AI_MODEL_MAIN,
+        latency_ms: Math.round(errorEndTime - aiStartTime),
+        status: 'error'
+      });
+    }
+
     return NextResponse.json({ reply: "Duh, sepertinya server sedang sibuk. Coba sebentar lagi ya!" }, { status: 500 });
   }
 }
@@ -305,7 +329,6 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       properties: {
         name: { type: SchemaType.STRING, description: "Nama pelanggan jika disebutkan, isi 'null' jika tidak ada" },
         phone: { type: SchemaType.STRING, description: "Nomor HP / WhatsApp pelanggan jika disebutkan, isi 'null' jika tidak ada" },
-        // [FIX 1]: Paksa AI merangkum jadi 2-4 kata kunci agar mudah di-search
         needs: { type: SchemaType.STRING, description: "Inti kebutuhan/keluhan DARI PELANGGAN. MAKSIMAL 2-4 KATA KUNCI (Contoh: 'Tanya Harga', 'Komplain Pengiriman'). DILARANG KERAS mengutip balasan/template dari Bot. Isi 'null' jika tidak ada." },
         total_people: { type: SchemaType.STRING, description: "Jumlah orang/kuantitas, isi 'null' jika tidak ada" },
         booking_date: { type: SchemaType.STRING, description: "Tanggal reservasi, isi 'null' jika tidak ada" },
@@ -313,15 +336,15 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       },
     };
 
+    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; // [NEW 🟢]
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-lite", 
+      model: EXTRACTOR_MODEL, 
       generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
     });
 
     const contextForExtraction = history.map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");    
     const fullChatLog = contextForExtraction + `\nUser: ${userMessage}\nBot: ${botReply}`;
 
-    // [FIX 2]: Tambahkan Aturan Besi di Prompt Ekstraktor
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini.
 ATURAN MUTLAK:
 1. Kolom 'needs' HANYA boleh diisi berdasarkan ucapan 'User'.
@@ -332,11 +355,28 @@ ATURAN MUTLAK:
 Chat Historis:
 ${fullChatLog}`;
 
+    // [NEW 🟢]: STOPWATCH UNTUK EKSTRAKTOR
+    const extractStartTime = performance.now();
     const extractionResult = await extractorModel.generateContent(checkPrompt);
+    const extractEndTime = performance.now();
     
     const rawText = extractionResult.response.text().trim();
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
+
+    // [NEW 🟢]: LOG BIAYA TOKEN DARI EKSTRAKTOR (BIAR TAGIHAN AKURAT 100%)
+    const extractUsage = extractionResult.response.usageMetadata;
+    if (extractUsage) {
+       await supabase.from("usage_logs").insert({
+         client_id: clientUUID,
+         model_used: EXTRACTOR_MODEL,
+         tokens_input: extractUsage.promptTokenCount,
+         tokens_output: extractUsage.candidatesTokenCount,
+         total_tokens: extractUsage.totalTokenCount,
+         latency_ms: Math.round(extractEndTime - extractStartTime),
+         status: 'success'
+       });
+    }
 
     if (extractedData.phone && extractedData.phone !== "null" && extractedData.phone.length > 5) {
       let phoneNumber = String(extractedData.phone).replace(/[^0-9]/g, ""); 
@@ -363,7 +403,6 @@ ${fullChatLog}`;
       }
 
       const finalName = (extractedData.name && extractedData.name !== "null") ? extractedData.name : (oldLead?.customer_name || "Web User");
-      // [FIX 3]: Jangan sembarangan masukin userMessage mentah ke database
       const finalNeeds = (extractedData.needs && extractedData.needs !== "null") ? extractedData.needs : (oldLead?.customer_needs || "-");
       const finalPeople = (extractedData.total_people && extractedData.total_people !== "null") ? extractedData.total_people : (oldLead?.total_people || null);
       const finalDate = (extractedData.booking_date && extractedData.booking_date !== "null") ? extractedData.booking_date : (oldLead?.booking_date || "-");
@@ -382,9 +421,6 @@ ${fullChatLog}`;
         platform: platformName.toLowerCase()
       };
 
-      // ... kode payload sebelumnya ...
-
-      // [FIX 4]: Kembalikan Error Handling Spesifik Supabase untuk Debugging
       if (oldLead) {
          const { error: updateErr } = await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
          if (updateErr) console.error("❌ Update DB Error:", updateErr.message);
@@ -395,5 +431,13 @@ ${fullChatLog}`;
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error:", extractError);
+     
+     // [NEW 🟢]: LOG ERROR JIKA EKSTRAKTOR GAGAL
+     await supabase.from("usage_logs").insert({
+         client_id: clientUUID,
+         model_used: "gemini-2.5-flash-lite",
+         latency_ms: 0,
+         status: 'error'
+     }); // Silent catch untuk log error
   }
 }

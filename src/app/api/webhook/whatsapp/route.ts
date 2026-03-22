@@ -47,6 +47,11 @@ function formatForWhatsApp(text: string) {
 // FUNGSI POST: ENGINE UTAMA TUMBUH AI WA (SAAS MULTI-TENANT)
 // ============================================================================
 export async function POST(request: Request) {
+  // [NEW 🟢]: Variabel CCTV Telemetry
+  let aiStartTime = 0;
+  let dbClientId: string | null = null;
+  const AI_MODEL_MAIN = "gemini-2.5-flash";
+
   try {
     const body = await request.json();
 
@@ -78,6 +83,8 @@ export async function POST(request: Request) {
           console.error("❌ Klien tidak ditemukan untuk Phone ID:", businessPhoneId);
           return NextResponse.json({ error: "Client Not Found" }, { status: 404 });
         }
+
+        dbClientId = client.id; // [NEW 🟢]: Simpan untuk jaga-jaga kalau error
 
         // --- 🔴 GEMBOK 1: KILL SWITCH DARI SUPER ADMIN ---
         if (client.is_active === false) {
@@ -125,14 +132,18 @@ export async function POST(request: Request) {
 
         // ====================================================================
         // [FIX UX]: CENTANG BIRU INSTAN DILAKUKAN DI SINI! 
-        // (Hanya jalan setelah semua gembok di atas lolos)
         // ====================================================================
         markMessageAsRead(businessPhoneId, client.whatsapp_access_token, messageId).catch(console.error);
 
         // --------------------------------------------------------------------
         // 3. PANGGIL GEMINI ENGINE (DENGAN AGENTIC TOOLS & RAG)
         // --------------------------------------------------------------------
+        aiStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch AI Utama
+
         const aiResult = await runGeminiAgent(client, incomingText, userName, senderPhone);
+
+        const aiEndTime = performance.now(); // [NEW 🟢]: Hentikan Stopwatch AI Utama
+        const latencyMs = Math.round(aiEndTime - aiStartTime); // [NEW 🟢]
 
         // --- LAPIS 3: TRIGGER HUMAN HANDOFF ---
         let finalResponseText = aiResult.text;
@@ -148,7 +159,6 @@ export async function POST(request: Request) {
         // --------------------------------------------------------------------
         finalResponseText = formatForWhatsApp(finalResponseText);
         
-        // BATASI JUMLAH BUBBLE MAKSIMAL 4 AGAR TIDAK TIMEOUT VERCEL
         const MAX_BUBBLES = 4;
         const splitMessages = finalResponseText.split(/\n\s*\n/).filter(msg => msg.trim() !== "").slice(0, MAX_BUBBLES);
 
@@ -161,22 +171,26 @@ export async function POST(request: Request) {
           platform: "whatsapp"
         });
 
+        // [NEW 🟢]: LOG TELEMETRY LENGKAP KE USAGE_LOGS
+        // Jika total token 0 (error jaringan internal Gemini), flag status jadi 'error'
         const saveUsageTask = supabase.from("usage_logs").insert({
           client_id: client.id,
+          model_used: AI_MODEL_MAIN,
           tokens_input: aiResult.inputTokens,
           tokens_output: aiResult.outputTokens,
-          total_tokens: aiResult.totalTokens
+          total_tokens: aiResult.totalTokens,
+          latency_ms: latencyMs,
+          status: aiResult.totalTokens > 0 ? 'success' : 'error' 
         });
 
         // Ekstraksi background persis seperti Web Chat
         runLeadExtractionBackground(client.id, senderPhone, userName, incomingText, finalResponseText, aiResult.chatHistory).catch(err => console.error(err));
 
-        // Loop Pengiriman WhatsApp (Delay diperpendek drastis agar Vercel & Meta tidak Timeout)
+        // Loop Pengiriman WhatsApp
         for (let i = 0; i < splitMessages.length; i++) {
           await sendWhatsAppMessage(businessPhoneId, client.whatsapp_access_token, senderPhone, splitMessages[i].trim());
           
           if (i < splitMessages.length - 1) {
-             // Delay sangat singkat (Maksimal 600ms) agar cepat selesai sebelum Meta marah
              const delay = Math.min(Math.max(splitMessages[i].length * 10, 200), 600);
              await new Promise(resolve => setTimeout(resolve, delay));
           }
@@ -190,6 +204,19 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error("❌ Fatal Webhook Error WA:", error);
+
+    // [NEW 🟢]: REKAM KEGAGALAN FATAL KE TELEMETRY
+    if (dbClientId) {
+      const errorEndTime = performance.now();
+      const failLatency = aiStartTime > 0 ? Math.round(errorEndTime - aiStartTime) : 0;
+      await supabase.from("usage_logs").insert({
+        client_id: dbClientId,
+        model_used: AI_MODEL_MAIN,
+        latency_ms: failLatency,
+        status: 'error'
+      });
+    }
+
     return NextResponse.json({ error: "Server Error" }, { status: 500 });
   }
 }
@@ -424,8 +451,9 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
       },
     };
 
+    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; // [NEW 🟢]
     const extractorModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-lite", 
+      model: EXTRACTOR_MODEL, 
       generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
     });
 
@@ -433,11 +461,28 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
     const fullChatLog = contextForExtraction + `\nUser: ${userMessage}\nBot: ${botReply}`;
 
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini. Jika data sudah pernah disebutkan di chat sebelumnya, JANGAN DIHAPUS (wajib ditulis ulang). \n\nChat Historis:\n${fullChatLog}`;
+    
+    const extractStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch Extractor
     const extractionResult = await extractorModel.generateContent(checkPrompt);
+    const extractEndTime = performance.now(); // [NEW 🟢]: Selesai Stopwatch
     
     const rawText = extractionResult.response.text().trim();
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
+
+    // [NEW 🟢]: LOG TELEMETRY EKSTRAKTOR (DENGAN AWAIT)
+    const extractUsage = extractionResult.response.usageMetadata;
+    if (extractUsage) {
+       await supabase.from("usage_logs").insert({
+         client_id: clientUUID,
+         model_used: EXTRACTOR_MODEL,
+         tokens_input: extractUsage.promptTokenCount,
+         tokens_output: extractUsage.candidatesTokenCount,
+         total_tokens: extractUsage.totalTokenCount,
+         latency_ms: Math.round(extractEndTime - extractStartTime),
+         status: 'success'
+       });
+    }
 
     // Mencegah error duplicate/ambigu: Ambil 1 data teratas berdasarkan waktu
     const { data: oldLead, error: selectError } = await supabase
@@ -493,5 +538,13 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error WA:", extractError);
+
+     // [NEW 🟢]: REKAM KEGAGALAN EKSTRAKTOR KE TELEMETRY (DENGAN AWAIT)
+     await supabase.from("usage_logs").insert({
+         client_id: clientUUID,
+         model_used: "gemini-2.5-flash-lite",
+         latency_ms: 0,
+         status: 'error'
+     });
   }
 }
