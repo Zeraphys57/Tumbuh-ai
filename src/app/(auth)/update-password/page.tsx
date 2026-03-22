@@ -28,6 +28,8 @@ export default function UpdatePasswordPage() {
       if (error) throw error;
 
       setMessage({ type: "success", text: "Password berhasil diubah! Mengalihkan..." });
+
+      await supabase.auth.signOut();
       
       // Lempar kembali ke login setelah sukses
       setTimeout(() => {

@@ -91,7 +91,7 @@ export default function ForgotPasswordPage() {
                 <input
                   type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500/50 outline-none transition-all text-sm font-bold text-slate-700 placeholder:text-slate-300"
-                  placeholder="jacquellinobryan@gmail.com"
+                  placeholder="email@gmail.com"
                 />
               </div>
               <button disabled={loading} type="submit" className="w-full bg-blue-600 text-white py-4.5 pt-5 pb-4 rounded-[1.5rem] font-black text-[11px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-900 transition-all disabled:opacity-50">
