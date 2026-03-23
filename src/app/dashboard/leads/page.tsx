@@ -43,7 +43,9 @@ export default function LeadsPage() {
         const { data: { user } } = await supabase.auth.getUser();
         
         if (user) {
-          const clientId = user.user_metadata?.client_id;
+          const clientId = user.user_metadata?.client_id || user.id;
+
+          console.log("🕵️‍♂️ ID KLIEN YANG TERDETEKSI:", clientId);
           
           if (clientId) {
             // 1. Ambil data client lengkap (termasuk limit)
