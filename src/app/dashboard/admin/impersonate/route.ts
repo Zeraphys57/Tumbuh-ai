@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       email: clientEmail,
       options: { 
           // Pastikan /dashboard/leads ini memang URL tujuan akhirnya
-          redirectTo: `${SITE_URL}/dashboard/leads` 
+          redirectTo: `${SITE_URL}/impersonate` 
         }
     });
 
