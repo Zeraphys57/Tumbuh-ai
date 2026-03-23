@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       }
     );
 
-    // 2. Ambil Email Klien dari Kamar Brankas (Auth) berdasarkan ID
+    // 2. Ambil Email Klien
     const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(clientId);
 
     if (userError || !userData.user || !userData.user.email) {
@@ -30,15 +30,18 @@ export async function POST(req: Request) {
     }
 
     const clientEmail = userData.user.email;
-    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    
+    // [BARU 🟢] AUTO-DETECT DOMAIN SAAT INI (Biar nggak bergantung sama .env)
+    const requestUrl = new URL(req.url);
+    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin;
 
-    // 3. GENERATE MAGIC LINK (Bypass Password)
-    // Ini menyuruh Supabase membuatkan link login sekali pakai khusus untuk email ini
+    // 3. GENERATE MAGIC LINK
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: clientEmail,
       options: { 
-            redirectTo: `${SITE_URL}/dashboard/leads` 
+          // Pastikan /dashboard/leads ini memang URL tujuan akhirnya
+          redirectTo: `${SITE_URL}/dashboard/leads` 
         }
     });
 
@@ -46,7 +49,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Gagal menembus keamanan: " + linkError.message }, { status: 500 });
     }
 
-    // 4. Kembalikan Link Ajaib (action_link) ke Frontend
+    // 4. Kembalikan Link Ajaib
     return NextResponse.json({ url: linkData.properties?.action_link }, { status: 200 });
 
   } catch (error: any) {
