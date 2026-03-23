@@ -13,30 +13,55 @@ export default function ImpersonateTransit() {
   );
 
   useEffect(() => {
-    // 1. PASANG RADAR: Supabase akan otomatis teriak kalau dia sudah selesai baca URL & bikin Cookie
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        setStatusText("AKSES DITERIMA! MENGALIHKAN...");
-        // Tembus gerbang utama dengan Cookie yang sudah matang!
-        window.location.href = "/dashboard/leads"; 
-      }
-    });
+    const processMagicLink = async () => {
+      // 1. TANGKAP URL HASH (Koper berisi Token Magic Link)
+      const hash = window.location.hash;
+      
+      if (hash && hash.includes("access_token")) {
+        setStatusText("MENYADAP DATA KLIEN...");
+        
+        // 2. BONGKAR KOPER SECARA MANUAL
+        // Kita pecah URL-nya untuk ngambil access_token dan refresh_token
+        const hashParams = new URLSearchParams(hash.substring(1));
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
 
-    // 2. BACKUP PLAN: Kasih waktu toleransi 3 detik. 
-    // Kalau lewat 3 detik nggak ada tanda-tanda login, baru kita tendang.
-    const timeout = setTimeout(async () => {
+        if (accessToken && refreshToken) {
+          // 3. PAKSA GANTI BAJU!
+          // Perintah ini akan mencopot sesi Admin, dan menggantinya dengan sesi Klien
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+
+          if (error) {
+            console.error("Gagal menyamar:", error);
+            router.push("/login");
+            return;
+          }
+
+          // 4. PENYAMARAN SUKSES! LANGSUNG MASUK!
+          setStatusText("PENYAMARAN BERHASIL! MENGALIHKAN...");
+          window.location.href = "/dashboard/leads";
+          return;
+        }
+      }
+
+      // BACKUP PLAN: Kalau nggak ada hash, kita cek sesi normal
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.error("Gagal mendapatkan sesi. Token mungkin kadaluarsa.");
-        router.push("/login"); 
+      if (session) {
+         window.location.href = "/dashboard/leads";
+      } else {
+         router.push("/login");
       }
-    }, 3000);
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(timeout);
     };
-  }, [router, supabase.auth]);
+
+    // Beri jeda 0.5 detik biar browser sempat memuat URL Hash dengan sempurna
+    setTimeout(() => {
+      processMagicLink();
+    }, 500);
+
+  }, [router, supabase]);
 
   // ANIMASI LOADING BIRU
   return (
