@@ -31,9 +31,14 @@ export async function POST(req: Request) {
 
     const clientEmail = userData.user.email;
     
-    // [BARU 🟢] AUTO-DETECT DOMAIN SAAT INI (Biar nggak bergantung sama .env)
-    const requestUrl = new URL(req.url);
-    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin;
+    // [FIX 🟢] BACA DOMAIN ASLI DARI HEADER BROWSER (ANTI-PROXY VERCEL)
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const protocol = req.headers.get("x-forwarded-proto") || "https";
+    
+    // Prioritaskan ENV, kalau kosong, rakit URL dari header asli
+    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || `${protocol}://${host}`;
+    
+    console.log("DEBUG IMPERSONATE - SITE URL DETECTED:", SITE_URL);
 
     // 3. GENERATE MAGIC LINK
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
