@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
+import toast from "react-hot-toast";
 
 // --- INTERFACES ---
 interface Lead {
@@ -10,7 +11,6 @@ interface Lead {
   is_bot_active: boolean;
   created_at: string;
   platform?: string;
-  // [NEW]: State lokal untuk Radar Pemantau
   live_preview?: string;
   has_new_activity?: boolean; 
 }
@@ -126,7 +126,7 @@ export default function LiveChat() {
               }
               
               // ==========================================================
-              // [DI SINI TEMPAT YANG BENAR]: Pantau aktifitas bot & lempar ke atas
+              // Pantau aktifitas bot & lempar ke atas
               // ==========================================================
               setLeads((prev) => {
                 const targetIndex = prev.findIndex(l => l.customer_phone === payload.new.customer_phone);
@@ -273,8 +273,19 @@ export default function LiveChat() {
   const toggleAiStatus = async () => {
     if (!activeLead) return;
     const newStatus = !activeLead.is_bot_active;
+    
+    // Update state lokal dulu agar responsif
     setLeads(leads.map(l => l.id === activeLead.id ? { ...l, is_bot_active: newStatus } : l));
-    await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
+    
+    const { error } = await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
+    
+    if (error) {
+       toast.error("Gagal mengubah status AI. Silakan coba lagi.");
+       // Revert state jika gagal
+       setLeads(leads.map(l => l.id === activeLead.id ? { ...l, is_bot_active: !newStatus } : l));
+    } else {
+       toast.success(newStatus ? "Sistem AI dilanjutkan." : "AI dihentikan sementara. Mode manual aktif.");
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -282,12 +293,12 @@ export default function LiveChat() {
     if (!inputText.trim() || !activeLead || !clientSlug) return;
 
     if (activeLead.is_bot_active) {
-      alert("⚠️ Harap 'Take Over Chat' (Matikan AI) terlebih dahulu sebelum membalas pesan pelanggan secara manual!");
+      toast.error("Harap 'Take Over Chat' (Matikan AI) terlebih dahulu sebelum membalas manual!");
       return;
     }
 
     if (inputText.trim().length > 2000) {
-      alert("⚠️ Pesan terlalu panjang! Maksimal 2000 karakter per pesan agar nyaman dibaca oleh pelanggan.");
+      toast.error("Pesan terlalu panjang! Maksimal 2000 karakter per pesan agar nyaman dibaca oleh pelanggan.");
       return;
     }
 
@@ -309,7 +320,6 @@ export default function LiveChat() {
     setChatLogs(prev => [...prev, optimisticMessage]);
     scrollToBottom();
 
-    // Bump saat admin kirim pesan manual
     setLeads((prev) => {
       const targetIndex = prev.findIndex(l => l.customer_phone === activePhone);
       if (targetIndex > -1) {
@@ -332,7 +342,7 @@ export default function LiveChat() {
 
     if (dbError) {
       setChatLogs(prev => prev.filter(msg => msg.id !== tempId));
-      alert("❌ Gagal mengirim pesan ke sistem. Silakan coba lagi.");
+      toast.error("Gagal menyimpan pesan ke database. Silakan coba lagi.");
       return; 
     } else if (dbData) {
       setChatLogs(prev => prev.map(msg => msg.id === tempId ? dbData : msg));
@@ -340,13 +350,17 @@ export default function LiveChat() {
 
     try {
       const apiUrl = activeLead.platform === 'instagram' ? '/api/webhook/instagram/send-manual' : '/api/webhook/whatsapp/send-manual';
-      await fetch(apiUrl, {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientSlug, customerPhone: activePhone, text: sentText })
       });
+      
+      if (!response.ok) throw new Error("API Meta Error");
+      
     } catch (err) {
       console.error("❌ Gagal mengirim pesan ke API Meta:", err);
+      toast.error(`Pesan gagal diteruskan ke ${activeLead.platform === 'instagram' ? 'Instagram' : 'WhatsApp'}.`);
     }
   };
 
@@ -516,7 +530,6 @@ export default function LiveChat() {
                     </div>
                   )}
 
-                  {/* [FIX]: max-w untuk HP lebih lega (85%), tambah break-words agar text luluh ke bawah */}
                   <div className={`flex w-full ${msg.sender === 'customer' ? 'justify-start' : 'justify-end'}`}>
                     <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-3 md:p-4 relative group transition-all duration-300 hover:shadow-lg break-words whitespace-pre-wrap overflow-hidden ${
                       msg.sender === 'customer' 

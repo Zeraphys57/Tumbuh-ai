@@ -14,6 +14,24 @@ export default function EmergencyContact({
   handleUpdateAdminPhone,
   isSavingPhone,
 }: EmergencyContactProps) {
+  
+  // Logika format nomor telepon otomatis
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // 1. Hanya izinkan ketikan angka dan simbol '+'
+    let value = e.target.value.replace(/[^\d+]/g, '');
+
+    // 2. Jika nomor dimulai dengan angka '0', otomatis ubah menjadi '+62'
+    if (value.startsWith('0')) {
+      value = '+62' + value.slice(1);
+    } 
+    // 3. Jika pengguna langsung mengetik '62', otomatis tambahkan '+' di depannya
+    else if (value.startsWith('62')) {
+      value = '+' + value;
+    }
+
+    setAdminPhone(value);
+  };
+
   return (
     <div className="bg-white border border-slate-200 p-8 rounded-[2.5rem] shadow-sm">
       <div className="flex items-start gap-4 mb-4">
@@ -25,21 +43,21 @@ export default function EmergencyContact({
         <div>
           <h3 className="font-black text-lg tracking-tight text-slate-800">Kontak Darurat</h3>
           <p className="text-[11px] font-medium text-slate-500 mt-1 leading-snug">
-            Nomor WhatsApp ini akan otomatis dihubungi oleh AI jika ada pelanggan komplain atau pesanan jumlah besar.
+            Nomor WhatsApp ini akan otomatis dihubungi oleh agen AI (Gemini-2.5-Flash) jika ada pelanggan komplain atau pesanan jumlah besar.
           </p>
         </div>
       </div>
       <div className="space-y-3 mt-5">
         <input
-          type="text"
+          type="tel"
           className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm font-bold text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
-          placeholder="Contoh: 081234567890"
+          placeholder="Contoh: +6281234567890"
           value={adminPhone}
-          onChange={(e) => setAdminPhone(e.target.value)}
+          onChange={handlePhoneChange}
         />
         <button
           onClick={handleUpdateAdminPhone}
-          disabled={isSavingPhone}
+          disabled={isSavingPhone || adminPhone.length < 10}
           className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-95 disabled:bg-slate-300 disabled:text-slate-500"
         >
           {isSavingPhone ? "Merekam Nomor..." : "Simpan Kontak"}
