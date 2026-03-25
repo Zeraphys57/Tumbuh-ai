@@ -51,13 +51,13 @@ export async function POST(req: Request) {
     // ========================================================================
     // 2. SANITASI & PEMBATASAN PAYLOAD (ANTI-OVERLOAD & HEMAT BIAYA)
     // ========================================================================
-    if (leads.length > 20) {
-      return NextResponse.json({ error: "Maksimal 20 leads per analisis agar ide lebih tajam." }, { status: 400 });
+    if (leads.length > 50) {
+      return NextResponse.json({ error: "Maksimal 50 leads per analisis agar ide lebih tajam." }, { status: 400 });
     }
 
     const chatDataToAnalyze = leads.map((lead: any) => ({
       customer_needs: lead.customer_needs || "Tidak spesifik",
-      chat_history: (lead.full_chat || "Tidak ada riwayat").slice(0, 500) // 🛡️ BATAS 500 KARAKTER
+      chat_history: (lead.full_chat || "Tidak ada riwayat").slice(0, 1000) // 🛡️ BATAS 500 KARAKTER
     }));
 
     // ========================================================================
