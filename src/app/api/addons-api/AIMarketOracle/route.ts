@@ -57,7 +57,7 @@ export async function POST(req: Request) {
 
     const chatDataToAnalyze = leads.map((lead: any) => ({
       customer_needs: lead.customer_needs || "Tidak spesifik",
-      chat: (lead.full_chat || "Tidak ada riwayat").slice(0, 500) // 🛡️ BATAS 500 KARAKTER
+      chat: (lead.full_chat || "Tidak ada riwayat").slice(0, 1000) // 🛡️ UBAH KE 1000 KARAKTER
     }));
 
     // ========================================================================
@@ -98,7 +98,7 @@ export async function POST(req: Request) {
 
       === ATURAN OUTPUT (JSON MURNI) ===
       - DILARANG memberikan teks pembuka atau penutup.
-      - Harus menghasilkan JSON ARRAY murni yang valid untuk di-parse.
+      - Harus menghasilkan JSON OBJECT murni yang valid untuk di-parse.
 
       Format JSON:
       {

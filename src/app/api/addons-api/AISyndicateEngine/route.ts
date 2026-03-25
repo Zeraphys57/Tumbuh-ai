@@ -1,45 +1,72 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+// Import Helper CCTV & Gatekeeper Kuota dari markas pusat!
+import { checkAndDeductQuota, logAiUsage } from "@/lib/quotaManager";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export async function POST(req: Request) {
+  let aiStartTime = 0;
+  // KEMBALI KE FLASH: Cerdas, Cepat, dan Murah! 🚀
+  const AI_MODEL = "gemini-2.5-flash"; 
+
   try {
     const body = await req.json();
     const { leads, clientId } = body;
 
-    // 1. VALIDASI
-    if (!clientId) return NextResponse.json({ error: "Client ID diperlukan" }, { status: 400 });
-    if (!leads || leads.length === 0) return NextResponse.json({ error: "Data leads kosong" }, { status: 400 });
+    // ========================================================================
+    // 1. GATEKEEPER AUTHENTICATION (ANTI-HIJACKING)
+    // ========================================================================
+    const cookieStore = cookies();
+    const supabaseAuth = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value; },
+        },
+      }
+    );
 
-    // 2. CEK SISA KUOTA
-    const { data: client, error: quotaError } = await supabase
-      .from("clients")
-      .select("premium_quota_left")
-      .eq("id", clientId)
-      .maybeSingle();
-
-    if (quotaError || !client) return NextResponse.json({ error: "Gagal memverifikasi client" }, { status: 500 });
+    const { data: { user } } = await supabaseAuth.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Sesi tidak valid. Silakan login kembali." }, { status: 401 });
     
-    if (client.premium_quota_left <= 0) {
-      return NextResponse.json({ 
-        error: "Kuota Premium AI Anda habis (Limit: 5/bln). Silakan hubungi admin Tumbuh.ai untuk upgrade!" 
-      }, { status: 403 });
+    const userClientId = user.user_metadata?.client_id || user.id;
+    if (userClientId !== clientId) return NextResponse.json({ error: "Akses ditolak." }, { status: 403 });
+
+    // ========================================================================
+    // 2. SANITASI & PEMBATASAN PAYLOAD
+    // ========================================================================
+    if (!leads || leads.length === 0) {
+      return NextResponse.json({ error: "Data leads kosong" }, { status: 400 });
     }
 
-    // 3. PROSES DATA KE GEMINI
+    // Guardrail: Maksimal 20 leads
+    if (leads.length > 20) {
+      return NextResponse.json({ error: "Maksimal 20 leads per analisis untuk menjaga kualitas ide kolaborasi." }, { status: 400 });
+    }
+
     const chatDataToAnalyze = leads.map((lead: any) => ({
       needs: lead.customer_needs,
-      chat: lead.full_chat || "Tidak ada riwayat"
+      chat: (lead.full_chat || "Tidak ada riwayat").slice(0, 1000) // Potong 1000 karakter
     }));
 
+    // ========================================================================
+    // 3. CEK & POTONG KUOTA GLOBAL (VIA HELPER)
+    // ========================================================================
+    const quotaCheck = await checkAndDeductQuota(clientId, 1);
+    if (!quotaCheck.allowed) {
+      return NextResponse.json({ error: quotaCheck.error }, { status: quotaCheck.status });
+    }
+
+    // ========================================================================
+    // 4. PROSES AI GENERATION (SYNDICATE ARCHITECT)
+    // ========================================================================
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-pro",
+      model: AI_MODEL,
       generationConfig: { responseMimeType: "application/json" }
     });
 
@@ -71,21 +98,53 @@ export async function POST(req: Request) {
       ]
     `;
 
-    const result = await model.generateContent(systemPrompt);
-    const syndicates = JSON.parse(result.response.text());
+    console.log(`[SYNDICATE ENGINE] Merancang kemitraan B2B untuk client: ${clientId}...`);
 
-    // 4. POTONG KUOTA
-    await supabase.from("clients")
-      .update({ premium_quota_left: client.premium_quota_left - 1 })
-      .eq("id", clientId);
+    aiStartTime = performance.now();
+    const result = await model.generateContent(systemPrompt);
+    const aiEndTime = performance.now();
+    
+    const latencyMs = Math.round(aiEndTime - aiStartTime);
+    const usage = result.response.usageMetadata;
+
+    // ========================================================================
+    // 5. DEFENSIVE JSON PARSING
+    // ========================================================================
+    let syndicates;
+    try {
+      const rawText = result.response.text().trim();
+      const cleanJson = rawText.replace(/```json|```/g, "").trim(); 
+      syndicates = JSON.parse(cleanJson);
+    } catch (parseError) {
+      console.error("❌ Gagal parsing JSON Syndicate Engine:", result.response.text());
+      throw new Error("Sistem Syndicate Architect mendeteksi anomali pada pemetaan kemitraan."); 
+    }
+
+    // ========================================================================
+    // 6. CCTV LOGGING
+    // ========================================================================
+    logAiUsage({
+      clientId,
+      modelUsed: AI_MODEL,
+      promptTokens: usage?.promptTokenCount,
+      completionTokens: usage?.candidatesTokenCount,
+      totalTokens: usage?.totalTokenCount,
+      latencyMs,
+      status: 'success'
+    }).catch(err => console.error("❌ Gagal mencatat log telemetry Syndicate:", err));
 
     return NextResponse.json({ 
-      syndicates, 
-      remainingQuota: client.premium_quota_left - 1 
+      syndicates,
+      remainingQuota: quotaCheck.remainingQuota 
     });
 
   } catch (error: any) {
-    console.error("🔥 ERROR DI BACKEND SYNDICATE:", error);
-    return NextResponse.json({ error: "Sistem sibuk atau kuota API terbatas" }, { status: 500 });
+    console.error("🔥 ERROR DI BACKEND SYNDICATE ENGINE:", error);
+
+    if (aiStartTime > 0) {
+      logAiUsage({ clientId: "unknown", modelUsed: AI_MODEL, latencyMs: 0, status: 'error' }).catch(() => {});
+    }
+
+    return NextResponse.json({ error: "Sistem Syndicate sedang memetakan ekosistem. Coba lagi nanti." }, { status: 500 });
   }
 }
