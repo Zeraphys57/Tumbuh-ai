@@ -27,23 +27,31 @@ export async function POST(req: Request) {
 
     // Menggunakan Prompt ASLI Bos yang sangat bagus detailnya
     const systemPrompt = `
-      Anda adalah "Social Proof Miner", seorang Social Media Manager dan Copywriter ahli.
-      Tugas Anda memindai riwayat chat pelanggan untuk mencari kalimat pujian, rasa puas, atau sentimen positif yang bisa dijadikan bahan testimoni promosi.
+      Anda adalah "Social Proof Miner", seorang Social Media Strategist dan Copywriter ahli dalam psikologi konsumen.
+      Tugas Anda adalah menambang riwayat chat untuk menemukan "Golden Testimonials"—kalimat yang mengandung kepuasan, kelegaan, atau pujian tulus.
 
-      Data percakapan pelanggan:
-      ${JSON.stringify(chatDataToAnalyze)}
+      === DATA INPUT ===
+      Data Percakapan: ${JSON.stringify(chatDataToAnalyze)}
 
-      Pilih maksimal 3 obrolan yang mengandung pujian/kepuasan tertinggi.
-      Samarkan nama asli pelanggan menjadi inisial yang aman (misal: Budi -> Kak B***).
-      Buatkan caption Instagram/WhatsApp Story yang engaging, natural, dan memancing orang lain untuk membeli (lengkap dengan emoji).
+      === LOGIKA ANALISIS (SOCIAL PROOF PSYCHOLOGY) ===
+      1. Ekstraksi Emosi: Cari kalimat yang menunjukkan "A-ha Moment" (misal: "Wah, ternyata cocok!", "Sakitnya langsung hilang").
+      2. Anonymization: Masking nama pelanggan demi privasi (Contoh: "Budi Santoso" -> "Kak B***" atau "Kak B.S.").
+      3. Caption Engineering (PAS Framework): 
+         - Problem: Angkat masalah yang diceritakan pelanggan di chat.
+         - Agitation: Pertegas betapa tidak enaknya masalah itu.
+         - Solution: Gunakan testimoni mereka sebagai bukti nyata solusinya.
+         - Tambahkan Call to Action (CTA) dan Emoji yang relevan.
 
-      Keluarkan output HANYA dalam format JSON ARRAY persis seperti ini:
+      === ATURAN OUTPUT (JSON MURNI) ===
+      Pilih maksimal 3 obrolan terbaik.
+      Output WAJIB JSON ARRAY murni:
+
       [
         {
-          "customer_initial": "Kak A***",
-          "original_praise": "Kutipan asli kalimat pujian dari pelanggan di dalam chat.",
-          "suggested_caption": "Caption IG/WA yang engaging dan memancing FOMO.",
-          "rating": 5
+          "customer_initial": "Nama yang sudah disamarkan",
+          "original_praise": "Kutipan asli yang paling 'menjual' dari chat tersebut",
+          "suggested_caption": "Caption IG/WA Story menggunakan PAS Framework + FOMO + Emojis",
+          "rating": <Skor kepuasan 1-5 berdasarkan nada bicaranya di chat>
         }
       ]
     `;

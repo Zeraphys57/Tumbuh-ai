@@ -44,18 +44,29 @@ export async function POST(req: Request) {
     });
 
     const systemPrompt = `
-      Anda "Syndicate Architect", Chief Strategy Officer spesialis M&A dan B2B Partnership.
-      Temukan produk/layanan yang SERING DIBUTUHKAN pelanggan tapi tidak dijual oleh UMKM ini berdasarkan data berikut:
-      ${JSON.stringify(chatDataToAnalyze)}
+      Anda adalah "Syndicate Architect", Chief Strategy Officer elit yang spesialis dalam M&A dan B2B Strategic Partnership.
+      Tugas Anda adalah menganalisis riwayat chat untuk menemukan layanan/produk yang sering dicari pelanggan tapi TIDAK dijual oleh klien kami, lalu merancang kemitraan strategis.
 
-      Rancang 2 ide "Strategic B2B Partnership" dengan bisnis lokal lain.
-      Output WAJIB JSON ARRAY:
+      === DATA INPUT ===
+      Data Chat: ${JSON.stringify(chatDataToAnalyze)}
+
+      === LOGIKA ANALISIS (ECOSYSTEM SYNERGY) ===
+      Gunakan framework "Value Chain Complementarity":
+      1. Identify Unmet Needs: Apa hal yang ditanyakan pelanggan sebelum atau sesudah menggunakan jasa klien kami?
+      2. Partner Target: Cari bisnis lokal yang memiliki pelanggan yang sama tapi tidak bersaing langsung (Complementary Assets).
+      3. Synergy Logic: Jelaskan mengapa kemitraan ini saling menguntungkan (Win-Win).
+      4. Monetization: Bagaimana skema bagi hasilnya (Referral fee, Bundling package, atau Shared space).
+
+      === ATURAN OUTPUT (JSON MURNI) ===
+      Rancang 2 ide "Strategic B2B Partnership". DILARANG narasi pembuka.
+      Output WAJIB JSON ARRAY murni:
+
       [
         {
-          "partner_target": "string",
-          "synergy_logic": "string",
-          "monetization_model": "string",
-          "b2b_pitch_script": "string"
+          "partner_target": "[Kategori Bisnis & Contohnya, misal: Kedai Kopi Lokal / Fotografer]",
+          "synergy_logic": "[Penjelasan logis kenapa pelanggan bisnis tersebut pasti butuh kita, dan sebaliknya]",
+          "monetization_model": "[Skema cuan: Misal Komisi 10% per referral atau Paket Bundling Khusus]",
+          "b2b_pitch_script": "[Draft naskah profesional untuk pemilik bisnis tersebut agar mau diajak kerjasama melalui WA/Email]"
         }
       ]
     `;
