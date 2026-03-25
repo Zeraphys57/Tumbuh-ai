@@ -7,41 +7,31 @@ const supabaseAdmin = createClient(
 );
 
 /**
- * Fungsi untuk mengecek dan memotong kuota Global Wallet klien.
+ * Fungsi untuk mengecek dan memotong kuota Global Wallet klien secara ATOMIC (Anti Race-Condition)
  */
 export async function checkAndDeductQuota(clientId: string, deductAmount: number = 1) {
   if (!clientId) {
     return { allowed: false, error: "Client ID diperlukan", status: 400 };
   }
 
-  // 1. Cek Sisa Kuota
-  const { data: client, error } = await supabaseAdmin
-    .from("clients")
-    .select("premium_quota_left")
-    .eq("id", clientId)
-    .maybeSingle();
+  // Panggil fungsi RPC yang dieksekusi langsung di dalam mesin Database
+  const { data: newQuota, error } = await supabaseAdmin.rpc('safe_deduct_quota', { 
+    p_client_id: clientId, 
+    p_amount: deductAmount 
+  });
 
-  if (error || !client) {
-    return { allowed: false, error: "Gagal memverifikasi data klien.", status: 500 };
+  if (error) {
+    console.error("❌ RPC Error:", error);
+    return { allowed: false, error: "Gagal memverifikasi kuota sistem.", status: 500 };
   }
 
-  if (client.premium_quota_left < deductAmount) {
+  // Jika fungsi mengembalikan -1, berarti saldo tidak cukup
+  if (newQuota === -1) {
     return { 
       allowed: false, 
       error: "Kuota Premium AI habis. Silakan hubungi admin Tumbuh.ai untuk upgrade paket!", 
       status: 403 
     };
-  }
-
-  // 2. Potong Kuota
-  const newQuota = client.premium_quota_left - deductAmount;
-  const { error: updateError } = await supabaseAdmin
-    .from("clients")
-    .update({ premium_quota_left: newQuota })
-    .eq("id", clientId);
-
-  if (updateError) {
-    return { allowed: false, error: "Gagal memotong kuota sistem.", status: 500 };
   }
 
   return { allowed: true, remainingQuota: newQuota };
