@@ -47,10 +47,10 @@ function formatForWhatsApp(text: string) {
 // FUNGSI POST: ENGINE UTAMA TUMBUH AI WA (SAAS MULTI-TENANT)
 // ============================================================================
 export async function POST(request: Request) {
-  // [NEW 🟢]: Variabel CCTV Telemetry
   let aiStartTime = 0;
   let dbClientId: string | null = null;
   const AI_MODEL_MAIN = "gemini-2.5-flash";
+  const AI_MODEL_ROUTER = "gemini-2.5-flash-lite";
 
   try {
     const body = await request.json();
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
       if (messages && messages.length > 0 && messages[0].type === "text") {
         const message = messages[0];
-        const messageId = message.id; // Kunci untuk centang biru
+        const messageId = message.id; 
         const senderPhone = message.from; 
         const incomingText = message.text.body; 
         const userName = value.contacts?.[0]?.profile?.name || "Pelanggan";
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Client Not Found" }, { status: 404 });
         }
 
-        dbClientId = client.id; // [NEW 🟢]: Simpan untuk jaga-jaga kalau error
+        dbClientId = client.id; 
 
         // --- 🔴 GEMBOK 1: KILL SWITCH DARI SUPER ADMIN ---
         if (client.is_active === false) {
@@ -131,21 +131,90 @@ export async function POST(request: Request) {
         }
 
         // ====================================================================
-        // [FIX UX]: CENTANG BIRU INSTAN DILAKUKAN DI SINI! 
+        // CENTANG BIRU INSTAN DILAKUKAN DI SINI! 
         // ====================================================================
         markMessageAsRead(businessPhoneId, client.whatsapp_access_token, messageId).catch(console.error);
 
+        // ========================================================================
+        // 🚀 2.5 [THE GAME CHANGER] INTENT DETECTOR (SANG SATPAM WA) 🚀
+        // ========================================================================
+        const intentSchema = {
+          type: SchemaType.OBJECT,
+          properties: {
+            intent: { type: SchemaType.STRING, description: "Pilih SATU: 'tanya_produk', 'tanya_harga', 'booking_reservasi', 'komplain', 'marah_emosi', atau 'out_of_scope'" },
+            confidence: { type: SchemaType.NUMBER, description: "Angka 1-100 seberapa yakin dengan klasifikasi intent ini" },
+            requires_human: { type: SchemaType.BOOLEAN, description: "True jika ini keluhan berat, marah-marah, nego harga ekstrem, atau bahasan di luar konteks bisnis" }
+          }
+        };
+
+        const businessContext = client.system_prompt ? client.system_prompt.slice(0, 300) : "bisnis umum";
+
+        const intentModel = genAI.getGenerativeModel({
+          model: AI_MODEL_ROUTER,
+          generationConfig: { responseMimeType: "application/json", responseSchema: intentSchema as any },
+          systemInstruction: `Tugasmu HANYA membaca pesan terakhir user dan mengkategorikan niatnya (intent) dalam konteks: "${businessContext}". Jangan membalas pesannya, cukup deteksi niatnya saja.`
+        });
+
+        const intentStartTime = performance.now();
+        const intentResult = await intentModel.generateContent(incomingText);
+        const intentEndTime = performance.now();
+
+        const rawIntentText = intentResult.response.text().trim();
+        const cleanIntentJson = rawIntentText.replace(/```json|```/g, "").trim();
+        const userIntent = JSON.parse(cleanIntentJson);
+
+        console.log(`[INTENT WA DETECTED]: ${userIntent.intent} (Yakin: ${userIntent.confidence}%) | Butuh Manusia: ${userIntent.requires_human}`);
+
+        // LOG CCTV SATPAM (FIRE-AND-FORGET)
+        const intentUsage = intentResult.response.usageMetadata;
+        if (intentUsage) {
+           supabase.from("usage_logs").insert({
+             client_id: dbClientId,
+             model_used: "intent-router (flash-lite)",
+             tokens_input: intentUsage.promptTokenCount,
+             tokens_output: intentUsage.candidatesTokenCount,
+             total_tokens: intentUsage.totalTokenCount,
+             latency_ms: Math.round(intentEndTime - intentStartTime),
+             status: 'success'
+           }).then(({ error }) => { if (error) console.error("⚠️ Intent Telemetry Error WA:", error.message); });
+        }
+
+        // ========================================================================
+        // 🛡️ HARD FALLBACK WHATSAPP (POTONG KOMPAS!)
+        // ========================================================================
+        if (userIntent.requires_human === true || userIntent.confidence < 60 || ['komplain', 'marah_emosi', 'out_of_scope'].includes(userIntent.intent)) {
+          console.log(`⛔ [FALLBACK WA TRIGGERED] Eksekusi Handoff untuk ${senderPhone}`);
+          
+          // 1. Matikan Bot untuk nomor ini agar obrolan selanjutnya masuk ke CS Manusia
+          if (lead) await supabase.from("leads").update({ is_bot_active: false }).eq("id", lead.id);
+
+          const fallbackReply = "Mohon maaf Kak, untuk pertanyaan spesifik, keluhan, atau hal ini agar lebih aman dan akurat Kakak akan saya sambungkan langsung dengan tim admin/CS kami ya. Mohon ditunggu sebentar 🙏";
+          
+          // 2. Simpan ke Chat Logs
+          await supabase.from("chat_logs").insert({
+            client_id: client.slug, customer_phone: senderPhone, message: incomingText, response: fallbackReply, replied_by: "ai", platform: "whatsapp"
+          });
+
+          // 3. Kirim pesan Fallback ke WA
+          await sendWhatsAppMessage(businessPhoneId, client.whatsapp_access_token, senderPhone, formatForWhatsApp(fallbackReply));
+
+          // 4. Ekstrak Background (Fire and forget)
+          runLeadExtractionBackground(client.id, senderPhone, userName, incomingText, fallbackReply, []).catch(e => console.error("⚠️ Extractor Error in Fallback WA:", e));
+
+          return NextResponse.json({ status: "success_handoff" }, { status: 200 });
+        }
+
         // --------------------------------------------------------------------
-        // 3. PANGGIL GEMINI ENGINE (DENGAN AGENTIC TOOLS & RAG)
+        // 3. PANGGIL GEMINI ENGINE (JIKA LOLOS SATPAM)
         // --------------------------------------------------------------------
-        aiStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch AI Utama
+        aiStartTime = performance.now(); 
 
-        const aiResult = await runGeminiAgent(client, incomingText, userName, senderPhone);
+        const aiResult = await runGeminiAgent(client, incomingText, userName, senderPhone, userIntent);
 
-        const aiEndTime = performance.now(); // [NEW 🟢]: Hentikan Stopwatch AI Utama
-        const latencyMs = Math.round(aiEndTime - aiStartTime); // [NEW 🟢]
+        const aiEndTime = performance.now(); 
+        const latencyMs = Math.round(aiEndTime - aiStartTime); 
 
-        // --- LAPIS 3: TRIGGER HUMAN HANDOFF ---
+        // --- LAPIS 3: TRIGGER HUMAN HANDOFF DARI AI UTAMA ---
         let finalResponseText = aiResult.text;
         if (finalResponseText.includes("[OPER_MANUSIA]")) {
            if (lead) await supabase.from("leads").update({ is_bot_active: false }).eq("id", lead.id);
@@ -171,8 +240,7 @@ export async function POST(request: Request) {
           platform: "whatsapp"
         });
 
-        // [NEW 🟢]: LOG TELEMETRY LENGKAP KE USAGE_LOGS
-        // Jika total token 0 (error jaringan internal Gemini), flag status jadi 'error'
+        // LOG TELEMETRY LENGKAP KE USAGE_LOGS
         const saveUsageTask = supabase.from("usage_logs").insert({
           client_id: client.id,
           model_used: AI_MODEL_MAIN,
@@ -183,7 +251,7 @@ export async function POST(request: Request) {
           status: aiResult.totalTokens > 0 ? 'success' : 'error' 
         });
 
-        // Ekstraksi background persis seperti Web Chat
+        // Ekstraksi background
         runLeadExtractionBackground(client.id, senderPhone, userName, incomingText, finalResponseText, aiResult.chatHistory).catch(err => console.error(err));
 
         // Loop Pengiriman WhatsApp
@@ -205,7 +273,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("❌ Fatal Webhook Error WA:", error);
 
-    // [NEW 🟢]: REKAM KEGAGALAN FATAL KE TELEMETRY
+    // REKAM KEGAGALAN FATAL KE TELEMETRY
     if (dbClientId) {
       const errorEndTime = performance.now();
       const failLatency = aiStartTime > 0 ? Math.round(errorEndTime - aiStartTime) : 0;
@@ -263,9 +331,9 @@ async function sendWhatsAppMessage(phoneId: string, waToken: string, to: string,
 }
 
 // ============================================================================
-// MESIN GEMINI UNTUK WA (SINKRON 100% DENGAN WEB CHAT TERMASUK AGENTIC TOOLS)
+// MESIN GEMINI UNTUK WA (TERMASUK INTENT ROUTING)
 // ============================================================================
-async function runGeminiAgent(client: any, userMessage: string, userName: string, senderPhone: string) {
+async function runGeminiAgent(client: any, userMessage: string, userName: string, senderPhone: string, userIntent: any) {
   try {
     let addonText = "";
     let featuresObj: any = {};
@@ -320,6 +388,8 @@ async function runGeminiAgent(client: any, userMessage: string, userName: string
     const masterBasePrompt = `Kamu adalah Customer Success & Sales Representative profesional dari sebuah bisnis.
       Pelanggan yang sedang chat denganmu di WhatsApp bernama: ${userName}.
 
+      INTENT PELANGGAN SAAT INI: [${userIntent.intent.toUpperCase()}] -> Fokuslah memberikan jawaban yang relevan dengan intent ini secara singkat (Maksimal 2-3 kalimat).
+
       === ATURAN BESI (HUKUM MUTLAK, DILARANG KERAS DILANGGAR) ===
       1. BATASAN PENGETAHUAN (ANTI-HALUSINASI):
       - Kamu HANYA TAHU apa yang tertulis di bagian "KONTEKS BISNIS KLIEN", "INFORMASI BISNIS TAMBAHAN", dan "DOKUMEN REFERENSI".
@@ -331,6 +401,7 @@ async function runGeminiAgent(client: any, userMessage: string, userName: string
       - Balas HANYA dengan kata persis ini: [OPER_MANUSIA]
 
       3. GAYA BAHASA & FORMAT CHAT (SANGAT PENTING):
+      - Maksimal 2-3 kalimat. Singkat, padat, jelas.
       - Gunakan 1 atau 2 emoji yang relevan 😊.
       - Diizinkan menggunakan cetak tebal (**) HANYA untuk kata kunci penting seperti Harga, Nama Produk, atau Jadwal.
       - JANGAN gunakan format list pakai bullet/hashtag kaku.
@@ -451,10 +522,10 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
       },
     };
 
-    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; // [NEW 🟢]
+    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; 
     const extractorModel = genAI.getGenerativeModel({ 
       model: EXTRACTOR_MODEL, 
-      generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
+      generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema as any } 
     });
 
     const contextForExtraction = history.map((m: any) => `${m.role === "model" ? "Bot" : "User"}: ${m.parts[0].text}`).join("\n");    
@@ -462,15 +533,15 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
 
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini. Jika data sudah pernah disebutkan di chat sebelumnya, JANGAN DIHAPUS (wajib ditulis ulang). \n\nChat Historis:\n${fullChatLog}`;
     
-    const extractStartTime = performance.now(); // [NEW 🟢]: Mulai Stopwatch Extractor
+    const extractStartTime = performance.now(); 
     const extractionResult = await extractorModel.generateContent(checkPrompt);
-    const extractEndTime = performance.now(); // [NEW 🟢]: Selesai Stopwatch
+    const extractEndTime = performance.now(); 
     
     const rawText = extractionResult.response.text().trim();
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
 
-    // [NEW 🟢]: LOG TELEMETRY EKSTRAKTOR (DENGAN AWAIT)
+    // LOG TELEMETRY EKSTRAKTOR
     const extractUsage = extractionResult.response.usageMetadata;
     if (extractUsage) {
        await supabase.from("usage_logs").insert({
@@ -484,7 +555,6 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
        });
     }
 
-    // Mencegah error duplicate/ambigu: Ambil 1 data teratas berdasarkan waktu
     const { data: oldLead, error: selectError } = await supabase
       .from("leads")
       .select("id, full_chat, customer_name, customer_needs, total_people, booking_date, booking_time, is_bot_active")
@@ -538,11 +608,9 @@ async function runLeadExtractionBackground(clientUUID: string, senderPhone: stri
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error WA:", extractError);
-
-     // [NEW 🟢]: REKAM KEGAGALAN EKSTRAKTOR KE TELEMETRY (DENGAN AWAIT)
      await supabase.from("usage_logs").insert({
          client_id: clientUUID,
-         model_used: "gemini-2.5-flash-lite",
+         model_used: "lead-extractor (flash-lite)",
          latency_ms: 0,
          status: 'error'
      });

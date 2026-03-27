@@ -19,21 +19,21 @@ const rateLimitMap = new Map<string, number>();
 setInterval(() => {
   const now = Date.now();
   rateLimitMap.forEach((timestamp, key) => {
-    if (now - timestamp > 60000) rateLimitMap.delete(key); // Hapus memori tiap menit
+    if (now - timestamp > 60000) rateLimitMap.delete(key); 
   });
 }, 60 * 1000);
 
 export async function POST(req: Request) {
-  // [NEW 🟢]: Variabel global untuk Telemetry CCTV
   let aiStartTime = 0;
   let dbClientId: string | null = null;
   const AI_MODEL_MAIN = "gemini-2.5-flash"; 
+  const AI_MODEL_ROUTER = "gemini-2.5-flash-lite"; // Satpam Pintu Depan
 
   try {
     const body = await req.json();
     
     // ========================================================================
-    // [FIX 🟡]: WHITELIST & VALIDASI SOURCE PLATFORM (ANTI-MANIPULASI)
+    // 1. WHITELIST & VALIDASI SOURCE PLATFORM 
     // ========================================================================
     const VALID_PLATFORMS = ["WEB", "WHATSAPP", "INSTAGRAM"];
     const rawSource = String(body.source || "WEB").toUpperCase();
@@ -41,28 +41,17 @@ export async function POST(req: Request) {
 
     const { message, clientId, history } = body;
 
-    // ========================================================================
-    // VALIDASI INPUT KERAS (KEAMANAN & BIAYA)
-    // ========================================================================
-    if (!message || !clientId) {
-      return NextResponse.json({ reply: "Sistem membutuhkan data yang lengkap." }, { status: 400 });
-    }
-    if (typeof message !== 'string' || message.trim().length === 0) {
-      return NextResponse.json({ reply: "Pesan tidak boleh kosong ya Kak 😊" }, { status: 400 });
-    }
-    if (message.length > 2000) {
-      return NextResponse.json({ reply: "Wah, pesannya kepanjangan nih Kak. Bisa diringkas sedikit? 😊" }, { status: 400 });
-    }
+    // VALIDASI INPUT KERAS 
+    if (!message || !clientId) return NextResponse.json({ reply: "Sistem membutuhkan data yang lengkap." }, { status: 400 });
+    if (typeof message !== 'string' || message.trim().length === 0) return NextResponse.json({ reply: "Pesan tidak boleh kosong ya Kak 😊" }, { status: 400 });
+    if (message.length > 2000) return NextResponse.json({ reply: "Wah, pesannya kepanjangan nih Kak. Bisa diringkas sedikit? 😊" }, { status: 400 });
 
-    // ========================================================================
-    // 1. RATE LIMITING (ANTI SPAM) - [FIX 🟡]: 2 DETIK UNTUK UX WEB CHAT
-    // ========================================================================
+    // RATE LIMITING (2 DETIK)
     const ip = req.headers.get("x-forwarded-for") || "anonymous";
     const rateLimitKey = `${clientId}_${ip}`; 
     const now = Date.now();
     const lastRequest = rateLimitMap.get(rateLimitKey);
     
-    // Diubah jadi 2000ms agar lebih nyaman buat user biasa
     if (lastRequest && now - lastRequest < 2000) { 
       return NextResponse.json({ reply: "Ketiknya pelan-pelan saja ya Kak... 🙏" }, { status: 429 });
     }
@@ -77,49 +66,109 @@ export async function POST(req: Request) {
       .eq("slug", clientId)
       .single();
 
-    // [FIX 🔴]: MENCEGAH INTERNAL ERROR LEAK KE USER LOG
     if (clientError || !client) {
-      console.error(`[CHAT API] Client tidak valid atau tidak ditemukan. Slug: ${clientId}`);
-      return NextResponse.json({ 
-        reply: "Sistem sedang memuat data atau asisten tidak tersedia. Silakan coba lagi nanti." 
-      }, { status: 404 });
+      console.error(`[CHAT API] Client tidak valid/tidak ditemukan. Slug: ${clientId}`);
+      return NextResponse.json({ reply: "Sistem sedang memuat data atau asisten tidak tersedia. Silakan coba lagi nanti." }, { status: 404 });
     }
     
     if (client.is_active === false) {
-      console.log(`⛔ Web Chat Ditolak: Klien ${clientId} sedang di-suspend.`);
-      return NextResponse.json({ 
-        reply: "Mohon maaf, layanan asisten virtual untuk bisnis ini sedang ditangguhkan sementara waktu. 🙏" 
-      });
+      return NextResponse.json({ reply: "Mohon maaf, layanan asisten virtual untuk bisnis ini sedang ditangguhkan sementara waktu. 🙏" });
     }
 
     const clientData = client; 
-    dbClientId = clientData.id; // [NEW 🟢]: Simpan ID untuk log jika nanti ada error
+    dbClientId = clientData.id;
 
+    // ========================================================================
+    // 🚀 2.5 [THE GAME CHANGER] INTENT DETECTOR (SANG SATPAM - MULTI TENANT) 🚀
+    // ========================================================================
+    const intentSchema = {
+      type: SchemaType.OBJECT,
+      properties: {
+        intent: { type: SchemaType.STRING, description: "Pilih SATU: 'tanya_produk', 'tanya_harga', 'booking_reservasi', 'komplain', 'marah_emosi', atau 'out_of_scope'" },
+        confidence: { type: SchemaType.NUMBER, description: "Angka 1-100 seberapa yakin dengan klasifikasi intent ini" },
+        requires_human: { type: SchemaType.BOOLEAN, description: "True jika ini keluhan berat, marah-marah, nego harga ekstrem, atau bahasan di luar konteks bisnis" }
+      }
+    };
+
+    // [FIX ✅]: Konteks Dinamis dari Database Klien (Max 300 char agar token hemat)
+    const businessContext = clientData.system_prompt ? clientData.system_prompt.slice(0, 300) : "bisnis umum";
+
+    const intentModel = genAI.getGenerativeModel({
+      model: AI_MODEL_ROUTER,
+      generationConfig: { 
+        responseMimeType: "application/json", 
+        responseSchema: intentSchema as any // [FIX 1]: Tambahkan "as any" di sini
+      },
+      systemInstruction: `Tugasmu HANYA membaca pesan terakhir user dan mengkategorikan niatnya (intent) dalam konteks: "${businessContext}". Jangan membalas pesannya, cukup deteksi niatnya saja.`
+    });
+
+    const intentStartTime = performance.now();
+    const intentResult = await intentModel.generateContent(message);
+    const intentEndTime = performance.now();
+    
+    // Parsing Hasil Satpam
+    const rawIntentText = intentResult.response.text().trim();
+    const cleanIntentJson = rawIntentText.replace(/```json|```/g, "").trim();
+    const userIntent = JSON.parse(cleanIntentJson);
+
+    console.log(`[INTENT DETECTED]: ${userIntent.intent} (Yakin: ${userIntent.confidence}%) | Butuh Manusia: ${userIntent.requires_human}`);
+
+    // LOG CCTV UNTUK SATPAM (FIRE-AND-FORGET)
+    const intentUsage = intentResult.response.usageMetadata;
+    if (intentUsage) {
+       // [FIX 2]: Gunakan .then() alih-alih .catch() untuk Supabase Fire-and-Forget
+       supabase.from("usage_logs").insert({
+         client_id: dbClientId,
+         model_used: "intent-router (flash-lite)",
+         tokens_input: intentUsage.promptTokenCount,
+         tokens_output: intentUsage.candidatesTokenCount,
+         total_tokens: intentUsage.totalTokenCount,
+         latency_ms: Math.round(intentEndTime - intentStartTime),
+         status: 'success'
+       }).then(({ error }) => {
+         if (error) console.error("⚠️ Intent Telemetry Error:", error.message);
+       });
+    }
+
+    // ========================================================================
+    // 🛡️ HARD FALLBACK (EKSEKUSI LANGSUNG TANPA MIKIR)
+    // ========================================================================
+    // [FIX ✅]: Array intent disesuaikan dengan schema generic
+    if (userIntent.requires_human === true || userIntent.confidence < 60 || ['komplain', 'marah_emosi', 'out_of_scope'].includes(userIntent.intent)) {
+      console.log(`⛔ [FALLBACK TRIGGERED] Pesan diblokir oleh Intent Router. Eksekusi Handoff.`);
+      
+      // [FIX ✅]: Pesan Handoff Generic untuk semua jenis bisnis
+      const fallbackReply = "Mohon maaf Kak, untuk pertanyaan spesifik, keluhan, atau hal ini agar lebih aman dan akurat Kakak akan saya sambungkan langsung dengan tim admin/CS kami ya. Boleh tinggalkan nomor WhatsApp Kakak agar segera kami hubungi? 🙏";
+      
+      // Tetap jalankan background ekstraksi agar chat log tersimpan! (Fire and forget)
+      runWebLeadExtraction(clientData.id, message, fallbackReply, history || [], platformName).catch(e => console.error("⚠️ Extractor Error in Fallback:", e));
+      
+      return NextResponse.json({ reply: fallbackReply, isHandoff: true });
+    }
+
+    // ========================================================================
+    // JIKA LOLOS SATPAM, BARU LANJUT KE PROSES BERAT (RAG & MASTER AI)
+    // ========================================================================
+    
     // --- LOGIKA ADDON LAMA (STATIC) ---
     let addonText = "";
     let featuresObj: any = {};
-    try {
-      featuresObj = typeof clientData.features === 'string' ? JSON.parse(clientData.features) : (clientData.features || {});
-    } catch (e) {}
+    try { featuresObj = typeof clientData.features === 'string' ? JSON.parse(clientData.features) : (clientData.features || {}); } catch (e) {}
 
     if (featuresObj?.has_addon === true) {
       const { data: addons } = await supabase.from("client_addons_data").select("addon_type, content").eq("client_id", clientData.id);
       if (addons && addons.length > 0) {
         addonText = `\n\n--- INFORMASI BISNIS TAMBAHAN (PENTING) ---\n`;
-        addons.forEach(addon => {
-          addonText += `[DATA ${addon.addon_type.toUpperCase()}]:\n${addon.content}\n\n`;
-        });
+        addons.forEach(addon => { addonText += `[DATA ${addon.addon_type.toUpperCase()}]:\n${addon.content}\n\n`; });
       }
     }
 
     // ========================================================================
-    // 🧠 3. RAG ENGINE: PENCARIAN DOKUMEN (KNOWLEDGE BASE) 🧠
+    // 🧠 3. RAG ENGINE 
     // ========================================================================
     let ragContextText = "";
     try {
       const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
-      
-      // RAG tetap MURNI menggunakan pesan user agar pencocokan vektor akurat
       const embedResult = await embeddingModel.embedContent({
         content: { role: "user", parts: [{ text: message }] },
         taskType: "RETRIEVAL_QUERY", 
@@ -127,64 +176,48 @@ export async function POST(req: Request) {
       } as any); 
       
       const queryVector = embedResult.embedding.values;
-
       const { data: matchedDocs, error: matchError } = await supabase.rpc("match_client_knowledge", {
-        query_embedding: queryVector,
-        match_threshold: 0.65, 
-        match_count: 3, 
-        p_client_id: clientData.id
+        query_embedding: queryVector, match_threshold: 0.65, match_count: 3, p_client_id: clientData.id
       });
 
-      if (matchError) {
-         console.error("RPC Error:", matchError);
-      } else if (matchedDocs && matchedDocs.length > 0) {
+      if (!matchError && matchedDocs && matchedDocs.length > 0) {
         ragContextText = `\n\n=== DOKUMEN REFERENSI DARI KNOWLEDGE BASE ===\n`;
-        matchedDocs.forEach((doc: any) => {
-          ragContextText += `[Sumber: ${doc.document_name}]:\n${doc.content}\n\n`;
-        });
-        ragContextText += `INSTRUKSI RAG KHUSUS: 
-- JIKA pelanggan bertanya hal yang relevan dengan Dokumen Referensi di atas, WAJIB gunakan data dari dokumen tersebut untuk menjawab!
-- JIKA jawaban tidak ada di Dokumen Referensi dan Konteks Bisnis, ikuti Aturan Besi nomor 1 (Jangan mengarang jawaban).\n`;
+        matchedDocs.forEach((doc: any) => { ragContextText += `[Sumber: ${doc.document_name}]:\n${doc.content}\n\n`; });
+        ragContextText += `INSTRUKSI RAG KHUSUS: \n- JIKA pelanggan bertanya hal yang relevan dengan Dokumen Referensi di atas, WAJIB gunakan data dari dokumen tersebut untuk menjawab!\n- JIKA jawaban tidak ada di Dokumen Referensi dan Konteks Bisnis, ikuti Aturan Besi nomor 1 (Jangan mengarang jawaban).\n`;
       }
-    } catch (ragErr) {
-      console.error("RAG Search Engine Error:", ragErr);
-    }
+    } catch (ragErr) { console.error("RAG Search Engine Error:", ragErr); }
 
     // ========================================================================
-    // 4. MASTER PROMPT SINKRONISASI (GABUNGAN SEMUA OTAK)
+    // 4. MASTER PROMPT SINKRONISASI
     // ========================================================================
     const masterBasePrompt = `Kamu adalah Customer Success & Sales Representative profesional dari sebuah bisnis.
+INTENT PELANGGAN SAAT INI: [${userIntent.intent.toUpperCase()}] -> Fokuslah memberikan jawaban yang relevan dengan intent ini secara singkat (Maksimal 2-3 kalimat).
 
-=== INFORMASI PLATFORM (SANGAT PENTING) ===
+=== INFORMASI PLATFORM ===
 [PLATFORM: ${platformName}]
-Pesan ini datang dari platform ${platformName}. Kamu WAJIB mengikuti instruksi khusus untuk platform ini (terutama cara meminta nomor WhatsApp/HP) seperti yang tertulis di bagian KONTEKS BISNIS KLIEN.
+Kamu WAJIB mengikuti instruksi khusus untuk platform ini (terutama cara meminta nomor WhatsApp) seperti tertulis di KONTEKS BISNIS.
 
-=== ATURAN BESI (HUKUM MUTLAK, DILARANG KERAS DILANGGAR) ===
+=== ATURAN BESI (HUKUM MUTLAK) ===
 1. BATASAN PENGETAHUAN (ANTI-HALUSINASI):
-- Kamu HANYA TAHU apa yang tertulis di bagian "KONTEKS BISNIS KLIEN", "INFORMASI TAMBAHAN", dan "DOKUMEN REFERENSI".
-- JIKA pelanggan bertanya harga, spesifikasi, atau layanan yang TIDAK TERTULIS di konteks, DILARANG MENGARANG JAWABAN.
-- Jawab dengan: "Mohon maaf kak, untuk detail tersebut saya harus cek dulu ke tim inti kami ya. Ada hal lain yang bisa saya bantu?"
+- Kamu HANYA TAHU apa yang tertulis di bagian "KONTEKS BISNIS", "INFORMASI TAMBAHAN", dan "DOKUMEN REFERENSI".
+- DILARANG MENGARANG JAWABAN. Jawab: "Mohon maaf kak, untuk detail tersebut saya harus cek dulu ke tim inti kami ya."
 
-2. PROTOKOL ESKALASI (OPER KE MANUSIA):
-- Jika pelanggan mulai marah, komplain keras, atau meminta bicara dengan manusia/admin/CS/dokter, HENTIKAN USAHA MENJAWAB.
+2. PROTOKOL ESKALASI:
+- Jika pelanggan meminta bicara dengan manusia/admin/dokter, HENTIKAN USAHA MENJAWAB.
 - Balas HANYA dengan kata persis ini: [OPER_MANUSIA]
 
-3. GAYA BAHASA & FORMAT CHAT:
-- Gunakan 1 atau 2 emoji yang relevan 😊.
-- Diizinkan menggunakan cetak tebal (**) HANYA untuk kata kunci penting seperti Harga, Nama Produk, atau Jadwal.
-- JANGAN gunakan format list pakai bullet/hashtag kaku.
-- JIKA JAWABANMU TERDIRI DARI DUA POIN/PIKIRAN YANG BERBEDA (Misal: Menjawab harga, lalu bertanya balik), PISAHKAN kedua kalimat tersebut dengan ENTER GANDA (dua kali baris baru).
+3. GAYA BAHASA & FORMAT:
+- Maksimal 2-3 kalimat. Singkat, padat, jelas.
+- Gunakan 1 atau 2 emoji 😊.
+- PISAHKAN dua kalimat yang idenya berbeda dengan ENTER GANDA.
 
-4. PROTOKOL CLOSING (LEAD CAPTURE):
-- Pancing pelanggan untuk memberikan Nama & Nomor WhatsApp mereka agar tim manusia bisa mem-follow up.
-
-=== KONTEKS BISNIS KLIEN (INSTRUKSI UTAMA) ===
-${clientData.system_prompt || "Bot sedang dalam tahap konfigurasi. Mohon sapa pelanggan dengan ramah."}
+=== KONTEKS BISNIS KLIEN ===
+${clientData.system_prompt || "Bot sedang dalam tahap konfigurasi."}
 ${addonText}
 ${ragContextText}`;
 
     // ========================================================================
-    // 🌟 SETUP AGENTIC TOOLS (DYNAMIC LOADING DARI DATABASE) 🌟
+    // 🌟 SETUP AGENTIC TOOLS 
     // ========================================================================
     const { data: enabledTools } = await supabase
       .from("client_agentic_tools")
@@ -192,20 +225,16 @@ ${ragContextText}`;
       .eq("client_id", clientData.id)
       .eq("is_active", true); 
 
-    const activeToolNames = enabledTools?.map(t => t.tool_name) || [];
-    const finalTools = activeToolNames;
+    const finalTools = enabledTools?.map(t => t.tool_name) || [];
     const geminiTools = getGeminiToolsConfig(finalTools);
 
-    // [NEW 🟢]: Pass modelName dynamically
     const modelOptions: any = { model: AI_MODEL_MAIN, systemInstruction: masterBasePrompt };
-    if (geminiTools) {
-      modelOptions.tools = geminiTools;
-    }
+    if (geminiTools) modelOptions.tools = geminiTools;
 
     const model = genAI.getGenerativeModel(modelOptions);
 
     // ========================================================================
-    // [FIX 🟢]: FILTER HISTORY KETAT & SELANG-SELING (ANTI ERROR GEMINI)
+    // FILTER HISTORY KETAT
     // ========================================================================
     const MAX_HISTORY = 30; 
     let safeHistory: any[] = [];
@@ -235,9 +264,6 @@ ${ragContextText}`;
 
     const chat = model.startChat({ history: safeHistory });
 
-    console.log(`[OMNICHANNEL ROUTER] Meneruskan pesan ke Gemini dengan mode platform: ${platformName}`);
-    
-    // [NEW 🟢]: MULAI STOPWATCH AI UTAMA
     aiStartTime = performance.now(); 
     
     const result = await chat.sendMessage(message);
@@ -245,22 +271,18 @@ ${ragContextText}`;
     let reply: string = "";
 
     // ========================================================================
-    // 🌟 THE AGENTIC INTERCEPTION (MENANGKAP FUNGSI AI) 🌟
+    // 🌟 THE AGENTIC INTERCEPTION (TOOL EXECUTION)
     // ========================================================================
     const functionCalls = response.functionCalls();
     
     if (functionCalls && functionCalls.length > 0) {
       const call = functionCalls[0];
-      console.log(`[AGENTIC] 🤖 Gemini meminta eksekusi tool: ${call.name} dengan args:`, call.args);
+      console.log(`[AGENTIC] 🤖 Eksekusi tool: ${call.name}`);
 
       try {
         const toolResult = await executeAgenticCall(call.name, call.args, clientData);
-        
         const step2Result = await chat.sendMessage([{
-          functionResponse: {
-            name: call.name,
-            response: toolResult
-          }
+          functionResponse: { name: call.name, response: toolResult }
         }]);
 
         response = await step2Result.response;
@@ -273,7 +295,6 @@ ${ragContextText}`;
       reply = response.text();
     }
 
-    // [NEW 🟢]: MATIKAN STOPWATCH & HITUNG LATENCY
     const aiEndTime = performance.now();
     const latencyMs = Math.round(aiEndTime - aiStartTime);
 
@@ -283,16 +304,18 @@ ${ragContextText}`;
       isHandoff = true; 
     }
 
-    // [NEW 🟢]: 5. EKSTRAKSI LEAD & USAGE LOG (DENGAN DATA LENGKAP)
+    // ========================================================================
+    // 5. EKSTRAKSI LEAD & USAGE LOG
+    // ========================================================================
     const usage = response.usageMetadata;
     const logPromise = usage ? supabase.from("usage_logs").insert({
       client_id: clientData.id,
-      model_used: AI_MODEL_MAIN,       // Log nama model asli
+      model_used: AI_MODEL_MAIN,       
       tokens_input: usage.promptTokenCount,
       tokens_output: usage.candidatesTokenCount,
       total_tokens: usage.totalTokenCount,
-      latency_ms: latencyMs,           // Log kecepatan response
-      status: 'success'                // Log status sukses
+      latency_ms: latencyMs,          
+      status: 'success'                
     }) : Promise.resolve();
 
     const extractPromise = runWebLeadExtraction(clientData.id, message, reply, safeHistory, platformName);
@@ -304,7 +327,6 @@ ${ragContextText}`;
   } catch (error: any) {
     console.error("Chat Error:", error.message);
     
-    // [NEW 🟢]: TANGKAP ERROR AI DAN CATAT KE TELEMETRY
     if (dbClientId && aiStartTime > 0) {
       const errorEndTime = performance.now();
       await supabase.from("usage_logs").insert({
@@ -320,7 +342,7 @@ ${ragContextText}`;
 }
 
 // ============================================================================
-// 🌟 FUNGSI BACKGROUND EKSTRAKSI LEAD (REVISI ANTI-HALUSINASI & SNIPER SEARCH) 🌟
+// 🌟 BACKGROUND EKSTRAKSI LEAD (TETAP SAMA SEPERTI SEBELUMNYA)
 // ============================================================================
 async function runWebLeadExtraction(clientUUID: string, userMessage: string, botReply: string, history: any[], platformName: string) {
   try {
@@ -329,14 +351,14 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
       properties: {
         name: { type: SchemaType.STRING, description: "Nama pelanggan jika disebutkan, isi 'null' jika tidak ada" },
         phone: { type: SchemaType.STRING, description: "Nomor HP / WhatsApp pelanggan jika disebutkan, isi 'null' jika tidak ada" },
-        needs: { type: SchemaType.STRING, description: "Inti kebutuhan/keluhan DARI PELANGGAN. MAKSIMAL 2-4 KATA KUNCI (Contoh: 'Tanya Harga', 'Komplain Pengiriman'). DILARANG KERAS mengutip balasan/template dari Bot. Isi 'null' jika tidak ada." },
+        needs: { type: SchemaType.STRING, description: "Inti kebutuhan/keluhan DARI PELANGGAN. MAKSIMAL 2-4 KATA KUNCI. DILARANG KERAS mengutip balasan/template dari Bot. Isi 'null' jika tidak ada." },
         total_people: { type: SchemaType.STRING, description: "Jumlah orang/kuantitas, isi 'null' jika tidak ada" },
         booking_date: { type: SchemaType.STRING, description: "Tanggal reservasi, isi 'null' jika tidak ada" },
         booking_time: { type: SchemaType.STRING, description: "Jam reservasi, isi 'null' jika tidak ada" },
       },
     };
 
-    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; // [NEW 🟢]
+    const EXTRACTOR_MODEL = "gemini-2.5-flash-lite"; 
     const extractorModel = genAI.getGenerativeModel({ 
       model: EXTRACTOR_MODEL, 
       generationConfig: { responseMimeType: "application/json", responseSchema: leadSchema } 
@@ -348,14 +370,13 @@ async function runWebLeadExtraction(clientUUID: string, userMessage: string, bot
     const checkPrompt = `Tugas: Ekstrak data pelanggan dari obrolan ini.
 ATURAN MUTLAK:
 1. Kolom 'needs' HANYA boleh diisi berdasarkan ucapan 'User'.
-2. JANGAN PERNAH memasukkan teks template dari 'Bot' (seperti "Silakan tinggalkan Nama dan Nomor WhatsApp") ke dalam 'needs'.
-3. Buat 'needs' menjadi kata kunci singkat agar mudah dicari di database.
-4. Jika data (telepon/nama/needs sebelumnya) sudah ada di chat, JANGAN DIHAPUS (pertahankan/gabungkan dengan rapi).
+2. JANGAN PERNAH memasukkan teks template dari 'Bot' ke dalam 'needs'.
+3. Buat 'needs' menjadi kata kunci singkat.
+4. Jika data sudah ada di chat, JANGAN DIHAPUS.
 
 Chat Historis:
 ${fullChatLog}`;
 
-    // [NEW 🟢]: STOPWATCH UNTUK EKSTRAKTOR
     const extractStartTime = performance.now();
     const extractionResult = await extractorModel.generateContent(checkPrompt);
     const extractEndTime = performance.now();
@@ -364,12 +385,11 @@ ${fullChatLog}`;
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const extractedData = JSON.parse(cleanJson);
 
-    // [NEW 🟢]: LOG BIAYA TOKEN DARI EKSTRAKTOR (BIAR TAGIHAN AKURAT 100%)
     const extractUsage = extractionResult.response.usageMetadata;
     if (extractUsage) {
        await supabase.from("usage_logs").insert({
          client_id: clientUUID,
-         model_used: EXTRACTOR_MODEL,
+         model_used: "lead-extractor (flash-lite)",
          tokens_input: extractUsage.promptTokenCount,
          tokens_output: extractUsage.candidatesTokenCount,
          total_tokens: extractUsage.totalTokenCount,
@@ -422,22 +442,18 @@ ${fullChatLog}`;
       };
 
       if (oldLead) {
-         const { error: updateErr } = await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
-         if (updateErr) console.error("❌ Update DB Error:", updateErr.message);
+         await supabase.from("leads").update(leadPayload).eq("id", oldLead.id);
       } else {
-         const { error: insertErr } = await supabase.from("leads").insert(leadPayload);
-         if (insertErr) console.error("❌ Insert DB Error:", insertErr.message);
+         await supabase.from("leads").insert(leadPayload);
       }
     }
   } catch (extractError) {
      console.error("⚠️ Background Extraction Error:", extractError);
-     
-     // [NEW 🟢]: LOG ERROR JIKA EKSTRAKTOR GAGAL
      await supabase.from("usage_logs").insert({
          client_id: clientUUID,
-         model_used: "gemini-2.5-flash-lite",
+         model_used: "lead-extractor (flash-lite)",
          latency_ms: 0,
          status: 'error'
-     }); // Silent catch untuk log error
+     }); 
   }
 }

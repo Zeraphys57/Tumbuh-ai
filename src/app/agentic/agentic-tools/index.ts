@@ -1,3 +1,5 @@
+import { FunctionDeclaration } from "@google/generative-ai";
+
 // ============================================================================
 // IMPORT SEMUA 10 SENJATA AGENTIC TUMBUH.AI
 // ============================================================================
@@ -15,8 +17,7 @@ import { panggilAdminSchema, executePanggilAdmin } from "./toolPanggilAdmin";
 // ============================================================================
 // 📚 REGISTRY ALAT AGENTIC (THE MASTER CATALOG)
 // ============================================================================
-export const AgenticToolRegistry: Record<string, { schema: any, execute: Function }> = {
-  // --- Kategori 1: Transaksi & Gudang ---
+export const AgenticToolRegistry: Record<string, { schema: FunctionDeclaration, execute: (args: any, clientConfig: any) => Promise<any> }> = {  // --- Kategori 1: Transaksi & Gudang ---
   "check_stock": { schema: checkStockSchema, execute: executeCheckStock },
   "buat_pesanan": { schema: buatPesananSchema, execute: executeBuatPesanan },
   "calculate_shipping": { schema: calculateShippingSchema, execute: executeCalculateShipping },
