@@ -212,39 +212,42 @@ export default function LeadsPage() {
   }
 
   return (
-    // FIX PENTING: bg-[#f8fafc] diganti ke bg-slate-950 agar background utamanya gelap
     <div className="min-h-screen bg-slate-950 font-sans flex flex-col relative">
       
-      {/* --- Tumbuh AI Global Top Bar (Dark Glassmorphism Style) --- */}
-      <div className="sticky top-0 z-50 p-4 md:p-6 pb-0">
-        <div className={`backdrop-blur-xl border rounded-[2rem] px-5 py-4 md:px-8 md:py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all duration-500 ${barTheme}`}>
+      {/* --- Tumbuh AI Global Top Bar (Responsive Dark Glassmorphism) --- */}
+      <div className="sticky top-0 z-50 p-3 md:p-6 pb-0">
+        <div className={`backdrop-blur-xl border rounded-[1.5rem] md:rounded-[2rem] p-4 md:px-8 md:py-5 flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 transition-all duration-500 shadow-lg ${barTheme}`}>
           
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl md:text-2xl border shrink-0 shadow-inner ${badgeTheme}`}>
+          {/* BAGIAN KIRI: Icon & Teks */}
+          <div className="flex items-start md:items-center gap-3 md:gap-4 w-full md:w-auto flex-1">
+            {/* Icon */}
+            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center text-lg md:text-2xl border shrink-0 shadow-inner ${badgeTheme}`}>
               {alertIcon}
             </div>
             
-            <div className="flex-1 w-full">
-              <div className="flex items-center gap-2 mb-1">
-                <p className={`text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] opacity-70 ${textTheme}`}>
+            {/* Teks Info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className={`text-[9px] md:text-[11px] font-black uppercase tracking-[0.2em] opacity-70 truncate ${textTheme}`}>
                   Tumbuh AI Monitor
                 </p>
                 {usageStats.percentage >= 80 && (
-                  <span className="relative flex h-2 w-2">
+                  <span className="relative flex h-1.5 w-1.5 md:h-2 md:w-2 shrink-0">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${progressFill}`}></span>
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${progressFill}`}></span>
+                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 ${progressFill}`}></span>
                   </span>
                 )}
               </div>
               
-              <h2 className={`text-sm md:text-base font-bold tracking-tight mb-1 ${textTheme}`}>
+              <h2 className={`text-sm md:text-base font-bold tracking-tight leading-tight mb-0.5 ${textTheme}`}>
                 {titleText}
               </h2>
-              <p className={`text-xs font-medium opacity-70 ${textTheme}`}>
+              <p className={`text-[10px] md:text-xs font-medium opacity-70 leading-snug ${textTheme}`}>
                 {message}
               </p>
 
-              <div className={`w-full h-1.5 md:h-2 rounded-full mt-3 overflow-hidden ${progressBg}`}>
+              {/* Progress Bar (Khusus Desktop: Tampil di dalam blok teks) */}
+              <div className={`hidden md:block w-full max-w-md h-1.5 md:h-2 rounded-full mt-2.5 overflow-hidden ${progressBg}`}>
                 <div 
                   className={`h-full rounded-full transition-all duration-1000 ease-out ${progressFill}`} 
                   style={{ width: `${Math.min(usageStats.percentage, 100)}%` }}
@@ -253,9 +256,18 @@ export default function LeadsPage() {
             </div>
           </div>
           
+          {/* Progress Bar (Khusus Mobile: Turun ke bawah, Full Width) */}
+          <div className={`md:hidden w-full h-1.5 rounded-full overflow-hidden shrink-0 ${progressBg}`}>
+            <div 
+              className={`h-full rounded-full transition-all duration-1000 ease-out ${progressFill}`} 
+              style={{ width: `${Math.min(usageStats.percentage, 100)}%` }}
+            ></div>
+          </div>
+
+          {/* BAGIAN KANAN: Tombol Download */}
           <button 
             onClick={downloadClientReport}
-            className={`w-full md:w-auto px-6 py-3.5 md:py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap flex items-center justify-center gap-2 shrink-0 ${buttonTheme}`}
+            className={`w-full md:w-auto px-4 py-3.5 md:px-6 md:py-3.5 rounded-xl md:rounded-2xl text-[10px] md:text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap flex items-center justify-center gap-2 shrink-0 border border-white/5 ${buttonTheme}`}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
             Download Laporan
@@ -264,6 +276,7 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* --- Konten Dashboard --- */}
       <div className="flex-1 overflow-auto p-4 md:p-6">
         {DashboardComponent}
       </div>
