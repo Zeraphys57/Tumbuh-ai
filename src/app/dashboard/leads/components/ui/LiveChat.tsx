@@ -31,8 +31,8 @@ const MESSAGES_PER_PAGE = 50;
 const formatChatMessage = (text: string) => {
   if (!text) return "";
   let safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  safe = safe.replace(/(?:\*\*|\*)(.*?)(?:\*\*|\*)/g, '<strong>$1</strong>');
-  safe = safe.replace(/_(.*?)_/g, '<em>$1</em>');
+  safe = safe.replace(/(?:\*\*|\*)(.*?)(?:\*\*|\*)/g, '<strong class="text-blue-300 drop-shadow-[0_0_5px_rgba(147,197,253,0.5)]">$1</strong>');
+  safe = safe.replace(/_(.*?)_/g, '<em class="text-slate-300 italic">$1</em>');
   safe = safe.replace(/\n/g, '<br />');
   return safe;
 };
@@ -67,7 +67,6 @@ export default function LiveChat() {
   useEffect(() => {
     activePhoneRef.current = activePhone;
     
-    // Matikan lampu notifikasi saat chat dibuka
     if (activePhone) {
       setLeads(prev => prev.map(l => l.customer_phone === activePhone ? { ...l, has_new_activity: false } : l));
     }
@@ -125,9 +124,6 @@ export default function LiveChat() {
                 scrollToBottom(); 
               }
               
-              // ==========================================================
-              // Pantau aktifitas bot & lempar ke atas
-              // ==========================================================
               setLeads((prev) => {
                 const targetIndex = prev.findIndex(l => l.customer_phone === payload.new.customer_phone);
                 
@@ -274,14 +270,12 @@ export default function LiveChat() {
     if (!activeLead) return;
     const newStatus = !activeLead.is_bot_active;
     
-    // Update state lokal dulu agar responsif
     setLeads(leads.map(l => l.id === activeLead.id ? { ...l, is_bot_active: newStatus } : l));
     
     const { error } = await supabase.from('leads').update({ is_bot_active: newStatus }).eq('id', activeLead.id);
     
     if (error) {
        toast.error("Gagal mengubah status AI. Silakan coba lagi.");
-       // Revert state jika gagal
        setLeads(leads.map(l => l.id === activeLead.id ? { ...l, is_bot_active: !newStatus } : l));
     } else {
        toast.success(newStatus ? "Sistem AI dilanjutkan." : "AI dihentikan sementara. Mode manual aktif.");
@@ -298,7 +292,7 @@ export default function LiveChat() {
     }
 
     if (inputText.trim().length > 2000) {
-      toast.error("Pesan terlalu panjang! Maksimal 2000 karakter per pesan agar nyaman dibaca oleh pelanggan.");
+      toast.error("Pesan terlalu panjang! Maksimal 2000 karakter per pesan.");
       return;
     }
 
@@ -365,31 +359,34 @@ export default function LiveChat() {
   };
 
   return (
-    <div className="flex h-[80vh] min-h-[600px] bg-slate-950 rounded-[2rem] border border-white/10 overflow-hidden shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] text-slate-200">
+    <div className="flex h-[80vh] min-h-[600px] bg-[#0a0f1a] rounded-[2rem] border border-white/10 overflow-hidden shadow-[0_0_50px_-15px_rgba(59,130,246,0.15)] text-slate-200 z-10 relative">
       
       {/* ====================================================================== */}
-      {/* KIRI: Daftar Kontak / Leads (MOBILE FRIENDLY: Hide jika chat aktif) */}
+      {/* KIRI: Daftar Kontak / Leads (MOBILE FRIENDLY) */}
       {/* ====================================================================== */}
-      <div className={`w-full md:w-1/3 border-r border-white/10 flex flex-col bg-slate-900/50 relative z-20 shadow-xl shadow-black/20 transition-all duration-300 ${activePhone ? 'hidden md:flex' : 'flex'}`}>
-        <div className="p-5 md:p-6 border-b border-white/10 bg-slate-900/80 backdrop-blur-md z-10 flex justify-between items-center">
+      <div className={`w-full md:w-1/3 border-r border-white/10 flex flex-col bg-[#060913]/50 relative z-20 transition-all duration-300 ${activePhone ? 'hidden md:flex' : 'flex'}`}>
+        
+        {/* SIDEBAR HEADER */}
+        <div className="p-5 md:p-6 border-b border-white/5 bg-white/[0.02] backdrop-blur-xl z-10 flex justify-between items-center">
           <div>
-            <h2 className="text-lg md:text-xl font-black italic tracking-tight text-white drop-shadow-md">INBOX LEAD</h2>
-            <p className="text-[9px] md:text-[10px] uppercase tracking-widest text-blue-400 mt-1 font-bold">Live Monitor</p>
+            <h2 className="text-lg md:text-xl font-black italic tracking-tight text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]">INBOX LEAD</h2>
+            <p className="text-[9px] md:text-[10px] uppercase tracking-widest text-blue-400 mt-1 font-bold drop-shadow-[0_0_5px_rgba(96,165,250,0.5)]">Live Monitor</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="relative flex h-2.5 w-2.5 md:h-3 md:w-3">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 md:h-3 md:w-3 bg-emerald-500"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 md:h-3 md:w-3 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
             </span>
-            <span className="text-[8px] md:text-[9px] uppercase font-black text-emerald-500 tracking-widest hidden sm:inline">RADAR ON</span>
+            <span className="text-[8px] md:text-[9px] uppercase font-black text-emerald-400 tracking-widest hidden sm:inline drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">RADAR ON</span>
           </div>
         </div>
         
+        {/* LEADS LIST */}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar relative">
           {leads.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center opacity-40">
-              <svg className="w-10 h-10 md:w-12 md:h-12 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
-              <p className="text-[10px] md:text-xs text-slate-400 font-bold tracking-widest uppercase italic">Belum ada leads masuk</p>
+              <svg className="w-10 h-10 md:w-12 md:h-12 mb-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
+              <p className="text-[10px] md:text-xs text-slate-500 font-bold tracking-widest uppercase italic">Belum ada leads masuk</p>
             </div>
           )}
 
@@ -397,49 +394,53 @@ export default function LiveChat() {
             <div 
               key={lead.id} 
               onClick={() => setActivePhone(lead.customer_phone)}
-              className={`p-4 border-b border-white/5 cursor-pointer transition-all duration-300 relative overflow-hidden ${
+              className={`p-4 border-b border-white/5 cursor-pointer transition-all duration-300 relative overflow-hidden group/lead ${
                 activePhone === lead.customer_phone 
-                  ? 'bg-blue-600/15 border-l-[4px] md:border-l-[6px] border-l-blue-500 shadow-inner' 
+                  ? 'bg-blue-500/10 border-l-[4px] md:border-l-[6px] border-l-blue-400 shadow-[inset_0_0_20px_rgba(59,130,246,0.05)]' 
                   : lead.has_new_activity
-                  ? 'bg-slate-800/80 border-l-[4px] md:border-l-[6px] border-l-blue-400 hover:bg-slate-800'
-                  : 'border-l-[4px] md:border-l-[6px] border-l-transparent hover:bg-slate-800/50'
+                  ? 'bg-white/[0.03] border-l-[4px] md:border-l-[6px] border-l-blue-400/50 hover:bg-white/[0.05]'
+                  : 'border-l-[4px] md:border-l-[6px] border-l-transparent hover:bg-white/[0.02]'
               }`}
             >
               {lead.has_new_activity && activePhone !== lead.customer_phone && (
                  <div className="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-blue-500/10 to-transparent skew-x-12 -translate-x-full animate-[shimmer_2s_infinite]"></div>
               )}
 
-              <div className="flex justify-between items-start mb-1">
-                <h3 className={`font-bold text-xs md:text-sm truncate flex items-center gap-1.5 ${
-                  activePhone === lead.customer_phone ? 'text-white' : lead.has_new_activity ? 'text-blue-100' : 'text-slate-300'
+              <div className="flex justify-between items-start mb-1 relative z-10">
+                <h3 className={`font-bold text-xs md:text-sm truncate flex items-center gap-1.5 transition-colors ${
+                  activePhone === lead.customer_phone ? 'text-blue-100' : lead.has_new_activity ? 'text-white' : 'text-slate-300 group-hover/lead:text-slate-200'
                 }`}>
-                  {lead.platform === 'instagram' ? '🟪 ' : '🟩 '}
+                  <span className="opacity-80">{lead.platform === 'instagram' ? '🟪' : '🟩'}</span> 
                   {lead.customer_name}
                 </h3>
                 
                 {lead.has_new_activity && activePhone !== lead.customer_phone && (
                   <span className="relative flex h-2 w-2 md:h-2.5 md:w-2.5 mt-1 mr-1 flex-shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 md:h-2.5 md:w-2.5 bg-blue-500"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 md:h-2.5 md:w-2.5 bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.8)]"></span>
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between relative z-10">
                 <p className="text-[9px] md:text-[10px] text-slate-500 truncate font-mono tracking-wider">{lead.customer_phone}</p>
               </div>
 
               {lead.live_preview && (
-                 <p className={`text-[10px] md:text-[11px] mt-2 truncate ${lead.has_new_activity ? 'text-blue-300/90 font-medium' : 'text-slate-500 italic'}`}>
+                 <p className={`text-[10px] md:text-[11px] mt-2 truncate relative z-10 ${lead.has_new_activity ? 'text-blue-300/90 font-medium' : 'text-slate-500 italic group-hover/lead:text-slate-400 transition-colors'}`}>
                    {lead.live_preview}
                  </p>
               )}
 
-              <div className="mt-2 md:mt-2.5 flex">
-                <span className={`text-[7px] md:text-[8px] px-1.5 md:px-2 py-0.5 rounded-md uppercase tracking-widest font-black shadow-sm flex items-center gap-1 ${lead.is_bot_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'}`}>
+              <div className="mt-2 md:mt-2.5 flex relative z-10">
+                <span className={`text-[7px] md:text-[8px] px-1.5 md:px-2 py-0.5 rounded-md uppercase tracking-widest font-black shadow-sm flex items-center gap-1 border ${
+                    lead.is_bot_active 
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_5px_rgba(16,185,129,0.1)]' 
+                    : 'bg-orange-500/10 text-orange-400 border-orange-500/20 shadow-[0_0_5px_rgba(249,115,22,0.1)]'
+                }`}>
                   {lead.is_bot_active ? (
                     <>
-                      <span className="w-1 h-1 md:w-1.5 md:h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span className="w-1 h-1 md:w-1.5 md:h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_5px_rgba(52,211,153,0.8)]"></span>
                       AI Active
                     </>
                   ) : '👨‍💻 Human Mode'}
@@ -451,28 +452,27 @@ export default function LiveChat() {
       </div>
 
       {/* ====================================================================== */}
-      {/* KANAN: Area Chat (MOBILE FRIENDLY: Tampil jika activePhone ada) */}
+      {/* KANAN: Area Chat */}
       {/* ====================================================================== */}
       {activeLead ? (
-        <div className={`w-full md:w-2/3 flex flex-col min-h-0 bg-slate-950 relative transition-all duration-300 ${activePhone ? 'flex' : 'hidden md:flex'}`}>
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-[0.03] pointer-events-none z-0"></div>
-          <div className="absolute bottom-0 right-0 w-[200px] h-[200px] md:w-[400px] md:h-[400px] bg-blue-600/10 rounded-full blur-[80px] md:blur-[100px] pointer-events-none z-0"></div>
+        <div className={`w-full md:w-2/3 flex flex-col min-h-0 relative transition-all duration-300 ${activePhone ? 'flex' : 'hidden md:flex'}`}>
+          {/* BACKGROUND ORBS CHAT */}
+          <div className="absolute top-1/4 right-0 w-[300px] h-[300px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none z-0"></div>
+          <div className="absolute bottom-1/4 left-0 w-[250px] h-[250px] bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none z-0"></div>
           
           {/* HEADER CHAT */}
-          <div className="px-4 md:px-6 py-3 md:py-4 border-b border-white/10 bg-slate-900/90 backdrop-blur-md flex justify-between items-center z-10 shadow-md">
+          <div className="px-4 md:px-6 py-3 md:py-4 border-b border-white/5 bg-white/[0.02] backdrop-blur-xl flex justify-between items-center z-20">
             <div className="flex items-center gap-2 md:gap-3 overflow-hidden">
-              
-              {/* TOMBOL BACK (Hanya muncul di HP) */}
               <button 
                 onClick={() => setActivePhone(null)}
-                className="md:hidden p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
+                className="md:hidden p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
               </button>
 
               <div className="truncate">
-                <h2 className="font-bold text-base md:text-lg text-white tracking-tight flex items-center gap-1.5 md:gap-2 truncate">
-                  <span className="flex-shrink-0">{activeLead.platform === 'instagram' ? '🟪' : '🟩'}</span> 
+                <h2 className="font-bold text-base md:text-lg text-white tracking-tight flex items-center gap-1.5 md:gap-2 truncate drop-shadow-md">
+                  <span className="flex-shrink-0 opacity-80">{activeLead.platform === 'instagram' ? '🟪' : '🟩'}</span> 
                   <span className="truncate">{activeLead.customer_name}</span>
                 </h2>
                 <p className="text-[9px] md:text-[11px] text-slate-400 font-mono tracking-widest mt-0.5 truncate">{activeLead.customer_phone}</p>
@@ -481,15 +481,15 @@ export default function LiveChat() {
 
             <button 
               onClick={toggleAiStatus}
-              className={`flex items-center flex-shrink-0 gap-1.5 md:gap-2.5 px-3 md:px-4 py-2 md:py-2.5 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 whitespace-nowrap ${
+              className={`flex items-center flex-shrink-0 gap-1.5 md:gap-2.5 px-3 md:px-4 py-2 md:py-2.5 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 whitespace-nowrap border ${
                 activeLead.is_bot_active 
-                ? 'bg-slate-800 text-slate-300 hover:bg-orange-500/20 hover:text-orange-400 border border-slate-700 hover:border-orange-500/50' 
-                : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                ? 'bg-white/5 text-slate-400 hover:bg-orange-500/10 hover:text-orange-400 border-white/10 hover:border-orange-500/30' 
+                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_20px_rgba(16,185,129,0.4)]'
               }`}
             >
               <span className="relative flex h-1.5 w-1.5 md:h-2 md:w-2">
-                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${activeLead.is_bot_active ? 'bg-emerald-400' : 'bg-orange-400'}`}></span>
-                 <span className={`relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 ${activeLead.is_bot_active ? 'bg-emerald-500' : 'bg-orange-500'}`}></span>
+                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${activeLead.is_bot_active ? 'bg-orange-400' : 'bg-emerald-400'}`}></span>
+                 <span className={`relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 ${activeLead.is_bot_active ? 'bg-orange-500' : 'bg-emerald-500 shadow-[0_0_5px_rgba(52,211,153,0.8)]'}`}></span>
               </span>
               <span className="hidden sm:inline">{activeLead.is_bot_active ? 'Take Over Chat' : 'Resume AI System'}</span>
               <span className="sm:hidden">{activeLead.is_bot_active ? 'Take Over' : 'Resume AI'}</span>
@@ -500,18 +500,18 @@ export default function LiveChat() {
           <div 
             ref={chatContainerRef}
             onScroll={handleScroll}
-            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 z-10 custom-scrollbar relative scroll-smooth"
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-5 z-10 custom-scrollbar relative scroll-smooth bg-[#060913]/30"
           >
             {isSwitchingChat && (
-               <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center z-50">
-                  <div className="w-6 h-6 md:w-8 md:h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-3"></div>
+               <div className="absolute inset-0 bg-[#0a0f1a]/60 backdrop-blur-sm flex flex-col items-center justify-center z-50">
+                  <div className="w-6 h-6 md:w-8 md:h-8 border-4 border-blue-500/20 border-t-blue-400 rounded-full animate-spin mb-3 drop-shadow-[0_0_10px_rgba(96,165,250,0.5)]"></div>
                   <p className="text-[9px] md:text-[10px] text-blue-400 font-black tracking-[0.2em] uppercase animate-pulse">Dekripsi Obrolan...</p>
                </div>
             )}
 
             {isLoadingMore && (
               <div className="flex justify-center my-4">
-                 <span className="bg-slate-800/80 text-blue-400 text-[8px] md:text-[9px] px-3 md:px-4 py-1.5 rounded-full border border-blue-500/30 uppercase font-black tracking-widest animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.2)]">
+                 <span className="bg-white/5 backdrop-blur-md text-blue-400 text-[8px] md:text-[9px] px-3 md:px-4 py-1.5 rounded-full border border-blue-500/20 uppercase font-black tracking-widest animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.1)]">
                    Sinkronisasi Data Lama...
                  </span>
               </div>
@@ -523,26 +523,26 @@ export default function LiveChat() {
               return (
                 <React.Fragment key={msg.id}>
                   {isFirstMsgOfDay && (
-                    <div className="flex justify-center my-4 md:my-6 sticky top-2 z-20">
-                      <span className="bg-slate-900/90 backdrop-blur-sm text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] px-4 md:px-5 py-1.5 rounded-full border border-white/10 shadow-lg">
+                    <div className="flex justify-center my-5 md:my-6 sticky top-2 z-20">
+                      <span className="bg-[#0d1322]/80 backdrop-blur-md text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] px-4 md:px-5 py-1.5 rounded-full border border-white/5 shadow-md">
                         {msg.date}
                       </span>
                     </div>
                   )}
 
                   <div className={`flex w-full ${msg.sender === 'customer' ? 'justify-start' : 'justify-end'}`}>
-                    <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-3 md:p-4 relative group transition-all duration-300 hover:shadow-lg break-words whitespace-pre-wrap overflow-hidden ${
+                    <div className={`max-w-[85%] md:max-w-[75%] rounded-[1.2rem] p-3 md:p-4 relative group transition-all duration-300 break-words whitespace-pre-wrap overflow-hidden ${
                       msg.sender === 'customer' 
-                        ? 'bg-slate-800/90 text-slate-100 rounded-tl-sm border border-slate-700/50' 
+                        ? 'bg-white/[0.03] text-slate-200 rounded-tl-sm border border-white/5 shadow-sm' 
                         : msg.sender === 'ai'
-                        ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-tr-sm shadow-[0_0_20px_rgba(37,99,235,0.15)] border border-blue-500/30'
-                        : 'bg-slate-700/80 text-white rounded-tr-sm border border-slate-600 border-l-4 border-l-orange-500' 
+                        ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-tr-sm shadow-[0_0_20px_rgba(37,99,235,0.2)] border border-blue-500/30'
+                        : 'bg-gradient-to-br from-orange-600 to-amber-600 text-white rounded-tr-sm shadow-[0_0_20px_rgba(249,115,22,0.2)] border border-orange-500/30' 
                     }`}>
                       <p 
-                        className="text-[12px] md:text-[14px] leading-relaxed break-words w-full" 
+                        className="text-[12px] md:text-[13px] leading-relaxed break-words w-full" 
                         dangerouslySetInnerHTML={{ __html: formatChatMessage(msg.text) }} 
                       />
-                      <div className={`text-[8px] md:text-[9px] mt-2 flex items-center justify-end gap-1.5 ${msg.sender === 'customer' ? 'text-slate-400' : 'text-white/70'}`}>
+                      <div className={`text-[8px] md:text-[9px] mt-2.5 flex items-center justify-end gap-1.5 ${msg.sender === 'customer' ? 'text-slate-500' : 'text-white/70'}`}>
                         <span className="uppercase font-black tracking-widest opacity-80">
                           {msg.sender === 'ai' ? '🤖 AI Node' : msg.sender === 'admin' ? '👨‍💻 Human' : ''}
                         </span>
@@ -557,10 +557,11 @@ export default function LiveChat() {
           </div>
 
           {/* INPUT AREA */}
-          <div className="p-3 md:p-4 bg-slate-900/95 border-t border-white/10 backdrop-blur-xl z-10 shadow-[0_-10px_30px_rgba(0,0,0,0.2)]">
+          <div className="p-3 md:p-4 bg-[#0a0f1a] border-t border-white/5 z-20 relative">
             {!activeLead.is_bot_active && (
-               <div className="mb-2 md:mb-2.5 text-[8px] md:text-[10px] text-orange-400 font-black uppercase tracking-widest animate-pulse flex items-center gap-1.5 px-2 bg-orange-500/10 w-fit py-1 rounded border border-orange-500/20">
-                 ⚠️ AI Paused. Manual Override.
+               <div className="mb-2.5 text-[8px] md:text-[9px] text-orange-400 font-black uppercase tracking-widest flex items-center gap-1.5 px-2.5 bg-orange-500/10 w-fit py-1.5 rounded-md border border-orange-500/20 shadow-[0_0_10px_rgba(249,115,22,0.1)]">
+                 <span className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-ping"></span>
+                 Manual Override Active
                </div>
             )}
             <form onSubmit={handleSendMessage} className={`flex gap-2 md:gap-3 relative transition-all duration-300 w-full ${activeLead.is_bot_active ? 'opacity-50 grayscale' : 'opacity-100'}`}>
@@ -570,12 +571,12 @@ export default function LiveChat() {
                 onChange={(e) => setInputText(e.target.value)}
                 disabled={activeLead.is_bot_active}
                 placeholder={activeLead.is_bot_active ? "Sistem AI sedang bekerja..." : `Ketik pesan...`}
-                className={`flex-1 w-full min-w-0 bg-black/40 border border-slate-700/80 rounded-xl px-3 md:px-5 py-2.5 md:py-3.5 text-xs md:text-sm text-white focus:outline-none transition-all placeholder:text-slate-500 placeholder:font-medium placeholder:truncate ${!activeLead.is_bot_active ? 'focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 cursor-text shadow-inner' : 'cursor-not-allowed'}`}
+                className={`flex-1 w-full min-w-0 bg-white/[0.02] border border-white/10 rounded-xl px-4 md:px-5 py-3 md:py-3.5 text-xs md:text-sm text-white focus:outline-none transition-all duration-300 placeholder:text-slate-600 placeholder:font-medium placeholder:truncate ${!activeLead.is_bot_active ? 'focus:bg-white/[0.04] focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30 cursor-text shadow-[inset_0_2px_10px_rgba(0,0,0,0.2)]' : 'cursor-not-allowed'}`}
               />
               <button 
                 type="submit"
                 disabled={!inputText.trim() || activeLead.is_bot_active}
-                className="bg-blue-600 text-white px-4 md:px-8 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(37,99,235,0.4)] disabled:hover:shadow-none active:scale-95 flex items-center justify-center gap-1.5 md:gap-2 flex-shrink-0"
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 md:px-8 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all duration-300 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(37,99,235,0.4)] disabled:hover:shadow-none active:scale-95 flex items-center justify-center gap-1.5 md:gap-2 flex-shrink-0 border border-white/10"
               >
                 <span className="hidden md:inline">Send</span>
                 <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
@@ -586,14 +587,15 @@ export default function LiveChat() {
         </div>
       ) : (
         /* ====================================================================== */
-        /* KANAN: EMPTY STATE (Hanya muncul di Desktop jika belum milih chat)     */
+        /* KANAN: EMPTY STATE */
         /* ====================================================================== */
-        <div className="hidden md:flex w-2/3 items-center justify-center bg-slate-950 flex-col z-10 opacity-50 relative">
-           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-20 pointer-events-none"></div>
-           <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-4 md:mb-5 shadow-2xl">
-             <svg className="w-6 h-6 md:w-8 md:h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+        <div className="hidden md:flex w-2/3 items-center justify-center bg-[#060913]/30 flex-col z-10 relative">
+           <div className="absolute inset-0 bg-blue-600/5 blur-[100px] rounded-full w-[400px] h-[400px] m-auto pointer-events-none"></div>
+           <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-center mb-5 shadow-2xl backdrop-blur-sm relative">
+             <div className="absolute inset-0 rounded-2xl border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.2)] animate-[pulse_3s_ease-in-out_infinite]"></div>
+             <svg className="w-8 h-8 md:w-10 md:h-10 text-blue-500/50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
            </div>
-           <h3 className="text-slate-300 font-black text-lg md:text-xl tracking-tight mb-1">TUMBUH RADAR</h3>
+           <h3 className="text-white font-black text-lg md:text-xl tracking-tight mb-2 drop-shadow-md">TUMBUH RADAR</h3>
            <p className="text-slate-500 text-[9px] md:text-[10px] font-bold tracking-[0.2em] uppercase italic text-center px-4">Pilih obrolan dari sebelah kiri untuk memantau</p>
         </div>
       )}
