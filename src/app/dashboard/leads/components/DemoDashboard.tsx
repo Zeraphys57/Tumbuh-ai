@@ -305,7 +305,12 @@ export default function DemoDashboard() {
               </div>
             )}
 
-            <AIPromptOptimizer currentPrompt={prompt} setPrompt={setPrompt} />
+            {/* Kirimkan variabel clientId yang ada di dashboard kamu */}
+            <AIPromptOptimizer 
+              currentPrompt={prompt} 
+              setPrompt={setPrompt} 
+              clientId={clientId} 
+            />
 
             <AITrainer 
               prompt={prompt} 
