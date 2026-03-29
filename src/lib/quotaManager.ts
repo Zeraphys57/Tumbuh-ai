@@ -1,10 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
-
-// Wajib gunakan Service Role Key untuk bypass RLS di Backend
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * Fungsi untuk mengecek dan memotong kuota Global Wallet klien secara ATOMIC (Anti Race-Condition)

@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Mengambil data dari .env.local
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-// Inisialisasi koneksi ke Database Tumbuh-core
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Client untuk frontend / anon access
+export const supabase = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+
+// Client untuk API routes — bypass RLS dengan service role key
+export const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!)
