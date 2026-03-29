@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { extractText } from "unpdf";
 
-export const maxDuration = 60;
+import { genAI } from "@/lib/gemini";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
+export const maxDuration = 60;
 
 function smartChunkText(text: string, chunkSize: number = 1000, overlap: number = 200) {
   const chunks = [];

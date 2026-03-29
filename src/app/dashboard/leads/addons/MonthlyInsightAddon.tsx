@@ -65,7 +65,7 @@ export default function MonthlyInsightAddon({ clientId, selectedMonth, leads }: 
         .map((l, index) => `${index + 1}. ${l.customer_needs || 'General Inquiry'}`)
         .join("\n");
 
-      const response = await fetch("/api/generate-insight", {
+      const response = await fetch("/api/addons-api/generate-insight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

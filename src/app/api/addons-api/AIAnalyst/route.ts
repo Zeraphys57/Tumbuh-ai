@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 // Import Helper CCTV & Gatekeeper Kuota
 import { checkAndDeductQuota, logAiUsage } from "@/lib/quotaManager";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { genAI } from "@/lib/gemini";
 
 export async function POST(req: Request) {
   let aiStartTime = 0;
@@ -81,7 +79,7 @@ export async function POST(req: Request) {
       Tugas Anda adalah membedah data mentah Voice of Customer (VoC) pada periode ${currentMonth} menggunakan framework analisis bisnis tingkat lanjut.
 
       Data Mentah (Needs/Request):
-      ${sanitizedLeads}
+      ${JSON.stringify(sanitizedLeads, null, 2)}
 
       Berikan "Executive Insight" dalam format Markdown dengan bahasa Indonesia yang tajam, profesional, dan berorientasi pada pertumbuhan (growth-oriented). 
       Terapkan framework berikut dalam menyusun laporan:

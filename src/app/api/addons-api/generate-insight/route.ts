@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 // Import Helper CCTV & Gatekeeper Kuota
 import { checkAndDeductQuota, logAiUsage } from "@/lib/quotaManager";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+import { genAI } from "@/lib/gemini";
 
 export async function POST(req: Request) {
   let aiStartTime = 0;
